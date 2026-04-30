@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Android ITS Box Live Demonstration</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <header class="topbar">
+        <section class="brand-heading">
+          <div class="brand-card" aria-label="Brycen Korea">
+            <img src="./assets/brycen-logo.png" alt="브라이센코리아" />
+          </div>
+          <div>
+            <p class="eyebrow">COEX LIVE DEMO</p>
+            <h1>Android ITS Box Visual Inspection</h1>
+          </div>
+        </section>
+        <section class="status-strip" aria-label="demo status">
+          <span class="status-dot"></span>
+          <strong>GMS Certification Ready Flow</strong>
+          <span id="clock">--:--:--</span>
+        </section>
+      </header>
+
+      <section class="dashboard-grid" aria-label="ITS demo dashboard">
+        <article class="panel live-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">01 / REAL-TIME</p>
+              <h2>ITS Live Camera Feed</h2>
+              <p class="live-caption" id="liveCaption">Waiting for ITS milestone...</p>
+            </div>
+            <span class="signal-badge" id="liveBadge">LIVE</span>
+          </div>
+
+          <div class="device-frame">
+            <div class="scanline"></div>
+            <div class="camera-scene" id="cameraScene" aria-label="simulated live camera feed">
+              <img id="dutMirror" class="dut-mirror" src="./data/live-dut-feed.png" alt="DUT live mirror" />
+              <div class="target-card target-main">
+                <span class="android-mark">ANDROID</span>
+                <span class="lens lens-a"></span>
+                <span class="lens lens-b"></span>
+                <span class="lens lens-c"></span>
+              </div>
+              <div class="focus-box focus-primary"></div>
+              <div class="focus-box focus-secondary"></div>
+              <div class="exposure-ruler">
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="live-metrics">
+            <div>
+              <span>FPS</span>
+              <strong id="fpsValue">30.0</strong>
+            </div>
+            <div>
+              <span>Latency</span>
+              <strong id="latencyValue">42 ms</strong>
+            </div>
+            <div>
+              <span>Frame</span>
+              <strong id="frameValue">000000</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel analytics-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">02 / ANALYSIS</p>
+              <h2>ITS Result Visualization</h2>
+            </div>
+            <span class="result-badge" id="resultBadge">SIM</span>
+          </div>
+
+          <div class="score-row">
+            <div class="score-ring" style="--score: 94">
+              <strong id="scoreValue">94</strong>
+              <span>Score</span>
+            </div>
+            <div class="summary-list">
+              <div>
+                <span>Color</span>
+                <strong id="colorValue">98.2%</strong>
+              </div>
+              <div>
+                <span>Sharpness</span>
+                <strong id="sharpnessValue">91.7%</strong>
+              </div>
+              <div>
+                <span>Exposure</span>
+                <strong id="exposureValue">96.4%</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart" aria-label="ITS analysis bar chart">
+            <div class="bar-row">
+              <span>Color Accuracy</span>
+              <div><i id="colorBar" style="--bar: 92%"></i></div>
+              <strong id="colorScore">92</strong>
+            </div>
+            <div class="bar-row">
+              <span>Resolution</span>
+              <div><i id="resolutionBar" style="--bar: 88%"></i></div>
+              <strong id="resolutionScore">88</strong>
+            </div>
+            <div class="bar-row">
+              <span>Dynamic Range</span>
+              <div><i id="dynamicRangeBar" style="--bar: 83%"></i></div>
+              <strong id="dynamicRangeScore">83</strong>
+            </div>
+            <div class="bar-row">
+              <span>Defect Detect</span>
+              <div><i id="defectBar" style="--bar: 96%"></i></div>
+              <strong id="defectScore">96</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel compare-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">03 / VALIDATION</p>
+              <h2>Raw Capture / Reference Check</h2>
+            </div>
+            <span class="file-badge">RAW</span>
+          </div>
+
+          <div class="compare-stage" id="compareStage">
+            <div class="raw-image raw-capture">
+              <span>RAW CAPTURE</span>
+            </div>
+            <div class="raw-image raw-reference" id="referenceImage">
+              <span>REFERENCE OVERLAY</span>
+            </div>
+            <div class="divider" id="divider"></div>
+          </div>
+
+          <label class="slider-row">
+            <span>Overlay</span>
+            <input id="compareSlider" type="range" min="8" max="92" value="54" />
+          </label>
+        </article>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
