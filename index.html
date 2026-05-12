@@ -29,51 +29,24 @@
         <article class="panel live-panel">
           <div class="panel-heading">
             <div>
-              <p class="panel-kicker">01 / REAL-TIME</p>
-              <h2>ITS Live Camera Feed</h2>
-              <p class="live-caption" id="liveCaption">Waiting for ITS milestone...</p>
+              <p class="panel-kicker">01 / Test Sequence</p>
+              <h2>ITS Test Case List</h2>
             </div>
-            <span class="signal-badge" id="liveBadge">LIVE</span>
+            <span class="file-badge">TC</span>
           </div>
 
-          <div class="device-frame">
-            <div class="scanline"></div>
-            <div class="camera-scene" id="cameraScene" aria-label="simulated live camera feed">
-              <img id="dutMirror" class="dut-mirror" src="./data/live-dut-feed.png" alt="DUT live mirror" />
-              <div class="target-card target-main">
-                <span class="android-mark">ANDROID</span>
-                <span class="lens lens-a"></span>
-                <span class="lens lens-b"></span>
-                <span class="lens lens-c"></span>
-              </div>
-              <div class="focus-box focus-primary"></div>
-              <div class="focus-box focus-secondary"></div>
-              <div class="exposure-ruler">
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
+          <div class="panel-content-split">
+            <div class="split-left">
+              <div class="tc-tree-container" id="tcTreeContainer">
+                <ul class="tc-list" id="tcList"></ul>
               </div>
             </div>
-          </div>
 
-          <div class="live-metrics">
-            <div>
-              <span>FPS</span>
-              <strong id="fpsValue">30.0</strong>
-            </div>
-            <div>
-              <span>Latency</span>
-              <strong id="latencyValue">42 ms</strong>
-            </div>
-            <div>
-              <span>Frame</span>
-              <strong id="frameValue">000000</strong>
+            <div class="split-right" id="customRightPanel">
+              <div class="placeholder-msg">Additional Content Area</div>
             </div>
           </div>
         </article>
-
         <article class="panel analytics-panel">
           <div class="panel-heading">
             <div>
@@ -127,30 +100,52 @@
             </div>
           </div>
         </article>
-
         <article class="panel compare-panel">
           <div class="panel-heading">
             <div>
-              <p class="panel-kicker">03 / VALIDATION</p>
-              <h2>Raw Capture / Reference Check</h2>
+              <p class="panel-kicker">03 / Test Capture</p>
+              <h2>ITS Live Camera Feed</h2>
+              <p class="live-caption" id="liveCaption">Waiting for ITS milestone...</p>
             </div>
-            <span class="file-badge">RAW</span>
+            <span class="signal-badge" id="liveBadge">LIVE</span>
           </div>
 
-          <div class="compare-stage" id="compareStage">
-            <div class="raw-image raw-capture">
-              <span>RAW CAPTURE</span>
+          <div class="device-frame">
+            <div class="scanline"></div>
+            <div class="camera-scene" id="cameraScene" aria-label="simulated live camera feed">
+              <img id="dutMirror" class="dut-mirror" src="./data/live-dut-feed.png" alt="DUT live mirror" />
+              <div class="target-card target-main">
+                <span class="android-mark">ANDROID</span>
+                <span class="lens lens-a"></span>
+                <span class="lens lens-b"></span>
+                <span class="lens lens-c"></span>
+              </div>
+              <div class="focus-box focus-primary"></div>
+              <div class="focus-box focus-secondary"></div>
+              <div class="exposure-ruler">
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
             </div>
-            <div class="raw-image raw-reference" id="referenceImage">
-              <span>REFERENCE OVERLAY</span>
-            </div>
-            <div class="divider" id="divider"></div>
           </div>
 
-          <label class="slider-row">
-            <span>Overlay</span>
-            <input id="compareSlider" type="range" min="8" max="92" value="54" />
-          </label>
+          <div class="live-metrics">
+            <div>
+              <span>FPS</span>
+              <strong id="fpsValue">30.0</strong>
+            </div>
+            <div>
+              <span>Latency</span>
+              <strong id="latencyValue">42 ms</strong>
+            </div>
+            <div>
+              <span>Frame</span>
+              <strong id="frameValue">000000</strong>
+            </div>
+          </div>
         </article>
       </section>
     </main>

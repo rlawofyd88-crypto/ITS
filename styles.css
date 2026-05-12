@@ -544,3 +544,119 @@ input[type="range"] {
     min-height: 420px;
   }
 }
+
+.tc-tree-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.tc-list, .tc-list ul {
+  list-style: none;
+  padding-left: 20px;
+}
+
+.tc-group .group-title {
+  font-weight: bold;
+  display: block;
+  margin: 10px 0 5px;
+  color: #ccc;
+}
+
+.tc-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tc-status {
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* 상태별 색상 */
+.tc-status.pass { color: #4caf50; }
+.tc-status.fail { color: #f44336; }
+.tc-status.skip { color: #9e9e9e; }
+.tc-status.running { color: #2196f3; animation: blink 1s infinite; }
+
+@keyframes blink {
+  50% { opacity: 0.5; }
+}
+
+/* 레이아웃 분할 */
+.panel-content-split {
+  display: flex;
+  flex: 1;
+  gap: 15px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.split-left, .split-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+/* TC 트리 스타일 */
+.tc-tree-container {
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+
+.tc-list, .tc-list ul {
+  list-style: none;
+  padding-left: 15px;
+  margin: 0;
+}
+
+.tc-group .group-title {
+  display: block;
+  font-weight: 700;
+  color: #888;
+  margin: 12px 0 6px 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.tc-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tc-name {
+  color: #eee;
+  font-family: monospace;
+}
+
+.tc-status {
+  font-size: 0.7rem;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* 상태별 색상 정의 */
+.tc-status.pass { color: #4caf50; }
+.tc-status.fail { color: #f44336; }
+.tc-status.skip { color: #9e9e9e; }
+.tc-status.running { color: #2196f3; }
+
+.placeholder-msg {
+  margin: auto;
+  color: #555;
+  font-style: italic;
+}

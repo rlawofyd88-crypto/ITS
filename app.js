@@ -15,13 +15,26 @@ const colorBar = document.querySelector("#colorBar");
 const resolutionBar = document.querySelector("#resolutionBar");
 const dynamicRangeBar = document.querySelector("#dynamicRangeBar");
 const defectBar = document.querySelector("#defectBar");
-const compareSlider = document.querySelector("#compareSlider");
-const referenceImage = document.querySelector("#referenceImage");
-const divider = document.querySelector("#divider");
+//const compareSlider = document.querySelector("#compareSlider");
+//const referenceImage = document.querySelector("#referenceImage");
+//const divider = document.querySelector("#divider");
 const dutMirror = document.querySelector("#dutMirror");
 const liveCaption = document.querySelector("#liveCaption");
 const liveBadge = document.querySelector("#liveBadge");
 const cameraScene = document.querySelector("#cameraScene");
+
+const tcListContainer = document.querySelector("#tcList");
+
+// --- CameraITS 테스트 구조 정의 ---
+// 실제 데이터 연동 전까지 샘플 데이터를 생성.
+const itsTestStructure = [
+  { scene: "scene0", tests: ["test_burst_capture", "test_jitter", "test_metadata"] },
+  { scene: "scene1_1", tests: ["test_3a", "test_ae_precapture_trigger", "test_crop_region_raw"] },
+  { scene: "scene1_2", tests: ["test_raw_sensitivity", "test_yuv_plus_raw"] },
+  { scene: "scene2_a", tests: ["test_effects", "test_format_combos"] },
+  { scene: "scene3", tests: ["test_lens_movement_reporting", "test_reprocess_edge_enhancement"] },
+  { scene: "scene4", tests: ["test_aspect_ratio_and_crop"] }
+];
 
 let frame = 41280;
 let externalDataActive = false;
@@ -157,19 +170,67 @@ async function refreshLiveState() {
   }
 }
 
-function updateCompare(value) {
-  const rightInset = 100 - value;
-  referenceImage.style.clipPath = `inset(0 ${rightInset}% 0 0)`;
-  divider.style.left = `${value}%`;
+// function updateCompare(value) {
+//   const rightInset = 100 - value;
+//   referenceImage.style.clipPath = `inset(0 ${rightInset}% 0 0)`;
+//   divider.style.left = `${value}%`;
+// }
+
+// compareSlider.addEventListener("input", (event) => {
+//   updateCompare(Number(event.target.value));
+// });
+
+// --- TC 리스트 렌더링 함수 ---
+function renderTcTree() {
+  tcListContainer.innerHTML = ""; // 초기화
+
+  itsTestStructure.forEach((item) => {
+    const groupLi = document.createElement("li");
+    groupLi.className = "tc-group";
+
+    // Scene 이름 (폴더명 형식)
+    groupLi.innerHTML = `<span class="group-title">${item.scene}</span>`;
+
+    const childUl = document.createElement("ul");
+    item.tests.forEach((testName) => {
+      // ID 생성 시 공백이나 특수문자 처리를 위해 안전한 ID 생성
+      const safeId = `${item.scene}-${testName}`.replace(/\./g, "_");
+
+      const tcLi = document.createElement("li");
+      tcLi.className = "tc-item";
+      tcLi.id = safeId;
+      tcLi.innerHTML = `
+        <span class="tc-name">${testName}</span>
+        <span class="tc-status">WAIT</span>
+      `;
+      childUl.appendChild(tcLi);
+    });
+
+    groupLi.appendChild(childUl);
+    tcListContainer.appendChild(groupLi);
+  });
 }
 
-compareSlider.addEventListener("input", (event) => {
-  updateCompare(Number(event.target.value));
-});
+/**
+ * TC 결과 업데이트 함수
+ * @param {string} scene - scene0, scene1_1 등
+ * @param {string} testName - 테스트 파일명
+ * @param {'PASS' | 'FAIL' | 'SKIP' | 'RUNNING'} status
+ */
+function setTcResult(scene, testName, status) {
+  const targetId = `${scene}-${testName}`.replace(/\./g, "_");
+  const item = document.getElementById(targetId);
+  if (!item) return;
+
+  const statusLabel = item.querySelector(".tc-status");
+  statusLabel.textContent = status;
+  statusLabel.className = `tc-status ${status.toLowerCase()}`;
+}
 
 updateClock();
+renderTcTree();
 updateMetrics();
-updateCompare(Number(compareSlider.value));
+//updateCompare(Number(compareSlider.value));
 setInterval(updateClock, 1000);
 setInterval(updateMetrics, 900);
 pollItsData();
@@ -178,3 +239,4 @@ refreshLiveFeed();
 setInterval(refreshLiveFeed, 1000);
 refreshLiveState();
 setInterval(refreshLiveState, 1500);
+setTcResult('tc-1-1', 'PASS');
