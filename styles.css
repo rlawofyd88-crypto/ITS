@@ -545,46 +545,6 @@ input[type="range"] {
   }
 }
 
-.tc-tree-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-}
-
-.tc-list, .tc-list ul {
-  list-style: none;
-  padding-left: 20px;
-}
-
-.tc-group .group-title {
-  font-weight: bold;
-  display: block;
-  margin: 10px 0 5px;
-  color: #ccc;
-}
-
-.tc-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.tc-status {
-  font-size: 0.8rem;
-  font-weight: 800;
-  padding: 2px 6px;
-  border-radius: 3px;
-}
-
-/* 상태별 색상 */
-.tc-status.pass { color: #4caf50; }
-.tc-status.fail { color: #f44336; }
-.tc-status.skip { color: #9e9e9e; }
-.tc-status.running { color: #2196f3; animation: blink 1s infinite; }
-
 @keyframes blink {
   50% { opacity: 0.5; }
 }
@@ -599,12 +559,28 @@ input[type="range"] {
 }
 
 .split-left, .split-right {
-  flex: 1;
   display: flex;
   flex-direction: column;
   background: rgba(0, 0, 0, 0.15);
   border-radius: 6px;
   padding: 10px;
+  min-height: 0; /* 내부 스크롤이 작동하도록 설정 */
+}
+
+/* 왼쪽: TC 이름 길이에 맞춤 */
+.split-left {
+  /* flex: 1 대신 아래 내용 적용 */
+  flex: 0 0 auto;           /* 크기가 강제로 늘어나거나 줄어들지 않음 */
+  min-width: max-content;   /* 가장 긴 TC 이름의 너비 확보 */
+  max-width: 45%;           /* 이름이 너무 길어 오른쪽을 가리는 것 방지 */
+  border-right: 1px solid var(--panel-line);
+}
+
+/* 오른쪽: 나머지 공간 전부 사용 */
+.split-right {
+  /* flex: 1 유지 또는 명시적 설정 */
+  flex: 1;                  
+  min-width: 0;             /* flex 자식 요소의 최소 너비 제한 해제 */
 }
 
 /* TC 트리 스타일 */
@@ -620,6 +596,7 @@ input[type="range"] {
 }
 
 .tc-group .group-title {
+  font-weight: bold;        /* 볼드체 적용 */
   display: block;
   font-weight: 700;
   color: #888;
@@ -634,10 +611,16 @@ input[type="range"] {
   align-items: center;
   padding: 6px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+
+  white-space: nowrap;      /* 이름이 줄바꿈되지 않게 강제 */
+  gap: 30px;                /* 이름과 Wait 사이 최소 간격 */
+  padding-right: 15px;      /* Wait 박스 우측 여백 확보 */
 }
 
 .tc-name {
+  font-weight: bold;        /* 볼드체 적용 */
   color: #eee;
+  flex-shrink: 0;           /* 이름이 압축되지 않도록 설정 */
   font-family: monospace;
 }
 
