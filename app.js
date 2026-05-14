@@ -55,9 +55,9 @@ let itsTestStructure = [
   {
     scene: "scene1_1",
     tests: {
-      test_ae_precapture_trigger: 1,
-      test_auto_vs_manual: 2,
-      test_black_white: 3,
+      test_ae_precapture_trigger: 0,
+      test_auto_vs_manual: 0,
+      test_black_white: 0,
       test_burst_capture: 0,
       test_burst_sameness_manual: 0,
       test_crop_region_raw: 0,
@@ -240,6 +240,7 @@ let itsTestStructure = [
   }
 ];
 
+let needsClear = false;
 let frame = 41280;
 let externalDataActive = false;
 const params = new URLSearchParams(window.location.search);
@@ -438,15 +439,93 @@ async function updateStatus() {
   }
 }
 
+let logQueue = [];
+let renderedLogs = new Set(); // 이미 화면에 표시된 로그 저장 (중복 방지)
+let isPausing = false;
+
+async function fetchLiveLogs() {
+    try {
+        const response = await fetch('http://localhost:8765/get-live-logs');
+        const logs = await response.json();
+        
+        logs.forEach(log => {
+            if (log.type === "SCENE_CHANGE") {
+                logQueue.push(log); // 플래그는 무조건 큐에 삽입
+            } else {
+                // 일반 로그만 중복 체크
+                if (!renderedLogs.has(log.text) || log.text.includes("Test results:")) {
+                    logQueue.push(log);
+                    renderedLogs.add(log.text);
+                }
+            }
+        });
+    } catch (e) { console.error(e); }
+}
+
+function startLogSimulation() {
+    const logViewer = document.getElementById("logViewer");
+    
+    const logInterval = setInterval(() => {
+        if (isPausing || logQueue.length === 0) return;
+
+        const log = logQueue.shift();
+
+        // 1. Scene 변경 플래그를 만났을 때
+        if (log.type === "SCENE_CHANGE") {
+            // 바로 비우지 않고, "다음에 로그가 들어오면 비워라"라고 예약만 합니다.
+            needsClear = true; 
+            console.log("다음 Scene 로그 유입 시 화면을 초기화합니다.");
+            return; 
+        }
+
+        // 2. 실제 로그를 출력하기 직전, 비우기 예약이 되어 있다면?
+        if (needsClear) {
+            logViewer.innerHTML = ""; // 여기서 비웁니다!
+            renderedLogs.clear();    
+            needsClear = false;       // 예약 해제
+            console.log("새 Scene 시작을 위해 이전 로그를 클리어했습니다.");
+        }
+
+        // 3. 기존 출력 로직 시작
+        const logLine = document.createElement("div");
+        logLine.className = "log-line-raw";
+        
+        let text = log.text;
+
+        if (text.includes("==========>")) {
+            text = `<b style="color: #ffca28; font-size: 1.1em;">${text}</b>`;
+        } else {
+            text = text
+                .replace("INFO", '<span class="log-info-tag">INFO</span>')
+                .replace("PASS", '<span class="log-pass-tag">PASS</span>')
+                .replace("FAIL", '<span class="log-fail-tag">FAIL</span>');
+        }
+        logLine.innerHTML = text;
+        logViewer.appendChild(logLine);
+        logViewer.scrollTop = logViewer.scrollHeight;
+
+        if (text.includes("Test results:")) {
+            isPausing = true;
+            setTimeout(() => { isPausing = false; }, 1000);
+        }
+        
+        // 성능 유지용
+        if (logViewer.childElementCount > 300) {
+            logViewer.removeChild(logViewer.firstChild);
+        }
+    }, 100);
+}
+
 // 2. 기존 초기화 로직 및 인터벌 유지
 function init() {
   updateClock();
   renderTcTree(); // TC 리스트업 실행
   updateMetrics();
-  
+  startLogSimulation();
   setInterval(updateClock, 1000);
   setInterval(updateMetrics, 900);
-  setInterval(updateStatus, 5000);
+  setInterval(updateStatus, 3000);
+  setInterval(fetchLiveLogs, 5000); // 5초마다 서버에서 새 로그 가져옴
   
   // 데이터 폴링 시작 (엔드포인트가 있을 경우)
   if (typeof pollItsData === "function") {

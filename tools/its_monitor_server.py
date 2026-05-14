@@ -2,11 +2,12 @@
 import argparse
 import json
 import time
+import os
+import glob
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, List, Dict
 
-# 상민님이 정의하신 JS 구조를 파이썬 리스트로 선언 (Master Structure)
 MASTER_STRUCTURE = [
     {"scene": "scene0", "tests": ["test_jitter", "test_metadata", "test_request_capture_match", "test_sensor_events", "test_solid_color_test_pattern", "test_test_patterns", "test_tonemap_curve", "test_unified_timestamps", "test_vibration_restriction"]},
     {"scene": "scene1_1", "tests": ["test_ae_precapture_trigger", "test_auto_vs_manual", "test_black_white", "test_burst_capture", "test_burst_sameness_manual", "test_crop_region_raw", "test_crop_regions", "test_exposure_x_iso", "test_latching", "test_linearity", "test_locked_burst"]},
@@ -31,7 +32,8 @@ MASTER_STRUCTURE = [
     {"scene": "scene7_tele", "tests": ["test_multi_camera_switch_tele"]},
     {"scene": "scene_video", "tests": ["test_preview_frame_drop"]}
 ]
-
+last_read_positions = {}
+last_scene_name = ""
 class ITSMonitor:
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
@@ -71,11 +73,15 @@ class ITSMonitor:
         
         return updated_list
 
+
+
 class ItsHandler(BaseHTTPRequestHandler):
     monitor: ITSMonitor
     def log_message(self, *args): pass
 
     def do_GET(self):
+        global last_read_positions
+        global last_scene_name
         if self.path == "/its-status.json":
             payload = json.dumps(self.monitor.get_updated_structure()).encode("utf-8")
             self.send_response(200)
@@ -83,6 +89,100 @@ class ItsHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(payload)
+        elif self.path == "/get-live-logs":
+            global last_scene_name
+            try:
+                latest_dir = self.monitor.get_latest_dir()
+                log_data = []
+        
+                if latest_dir:
+                    # 1. 최신 로그 파일들을 순회
+                    log_files = sorted(latest_dir.rglob("test_log.INFO"), key=lambda p: p.stat().st_mtime)
+                    
+                    for log_file in log_files:
+                        # [핵심 수정] 파일의 부모 폴더(예: test_jpeg)의 부모(예: scene1_1) 이름을 가져옵니다.
+                        actual_scene_name = log_file.parent.parent.parent.name 
+        
+                        # 2. 진짜 Scene 폴더 이름이 바뀌었는지 체크
+                        #print(f"last_scene_name: {last_scene_name}, actual_scene_name: {actual_scene_name}")
+                        if last_scene_name and last_scene_name != actual_scene_name:
+                            log_data.append({
+                                "type": "SCENE_CHANGE", 
+                                "text": f"--- SCENE_CHANGED_{actual_scene_name} ---" 
+                            })
+                        
+                        last_scene_name = actual_scene_name # 현재 Scene 저장
+        
+                        # 3. 기존 파일 읽기 로직 시작
+                        file_path = str(log_file)
+                        if file_path not in last_read_positions:
+                            last_read_positions[file_path] = 0
+                        
+                        current_size = log_file.stat().st_size
+
+                        if current_size > last_read_positions[file_path]:
+                            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                                f.seek(last_read_positions[file_path])
+                                chunk = f.read()
+                                if chunk:
+                                    last_read_positions[file_path] = f.tell()
+                                    # splitlines 대신 \n으로 쪼개서 마지막 줄 누락 방지
+                                    lines = chunk.replace('\r', '').split('\n')
+                                    for line in lines:
+                                        clean_line = line.strip()
+                                        if clean_line:
+                                            log_data.append({"text": clean_line})
+
+                # 응답 전송 부분
+                payload = json.dumps(log_data).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(payload)
+
+            except Exception as e:
+                print(f"Log Error: {e}")
+                # 에러 발생 시 빈 배열이라도 응답하여 브라우저 에러 방지
+                self.send_response(200) 
+                self.end_headers()
+                self.wfile.write(b"[]")
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def get_time_ordered_logs(self):
+        latest_dir = self.monitor.get_latest_dir()
+        if not latest_dir:
+            return []
+
+        all_logs = []
+        # 모든 scene 하위의 test_log.INFO 파일들을 탐색
+        log_files = latest_dir.rglob("test_log.INFO") # 혹은 *.txt
+
+        for log_file in log_files:
+            # 파일 수정 시간을 기준으로 로그 라인 생성 (실제 파일 내용 대신 파일 정보를 활용)
+            mtime = time.ctime(log_file.stat().st_mtime)
+            scene_name = log_file.parent.parent.name
+            test_name = log_file.parent.name
+
+            # 실제 파일을 읽어 첫 3줄 정도만 가져와서 리스트화 (시뮬레이션용)
+            try:
+                with open(log_file, "r") as f:
+                    content = [line.strip() for line in f.readlines()[:3]]
+                    for line in content:
+                        if line:
+                            all_logs.append({
+                                "time": mtime,
+                                "scene": scene_name,
+                                "test": test_name,
+                                "text": line
+                            })
+            except:
+                continue
+
+        # 시간 순서대로 정렬
+        return sorted(all_logs, key=lambda x: x['time'])
 
 def main():
     parser = argparse.ArgumentParser()
