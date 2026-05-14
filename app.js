@@ -37,94 +37,206 @@ function formatTcName(name) {
         .join('');
 }
 // --- CameraITS 테스트 구조 정의 ---
-const itsTestStructure = [
+let itsTestStructure = [
   {
     scene: "scene0",
-    tests: ["test_jitter", "test_metadata", "test_request_capture_match", "test_sensor_events", "test_solid_color_test_pattern", "test_test_patterns", "test_tonemap_curve", "test_unified_timestamps", "test_vibration_restriction"]
+    tests: {
+      test_jitter: 0,
+      test_metadata: 0,
+      test_request_capture_match: 0,
+      test_sensor_events: 0,
+      test_solid_color_test_pattern: 0,
+      test_test_patterns: 0,
+      test_tonemap_curve: 0,
+      test_unified_timestamps: 0,
+      test_vibration_restriction: 0
+    }
   },
   {
     scene: "scene1_1",
-    tests: ["test_ae_precapture_trigger", "test_auto_vs_manual", "test_black_white", "test_burst_capture", "test_burst_sameness_manual", "test_crop_region_raw", "test_crop_regions", "test_exposure_x_iso", "test_latching", "test_linearity", "test_locked_burst"]
+    tests: {
+      test_ae_precapture_trigger: 1,
+      test_auto_vs_manual: 2,
+      test_black_white: 3,
+      test_burst_capture: 0,
+      test_burst_sameness_manual: 0,
+      test_crop_region_raw: 0,
+      test_crop_regions: 0,
+      test_exposure_x_iso: 0,
+      test_latching: 0,
+      test_linearity: 0,
+      test_locked_burst: 0
+    }
   },
   {
     scene: "scene1_2",
-    tests: ["test_param_color_correction", "test_param_flash_mode", "test_param_noise_reduction", "test_param_shading_mode", "test_param_tonemap_mode", "test_post_raw_sensitivity_boost", "test_raw_exposure", "test_reprocess_noise_reduction", "test_tonemap_sequence", "test_yuv_plus_dng"]
+    tests: {
+      test_param_color_correction: 0,
+      test_param_flash_mode: 0,
+      test_param_noise_reduction: 0,
+      test_param_shading_mode: 0,
+      test_param_tonemap_mode: 0,
+      test_post_raw_sensitivity_boost: 0,
+      test_raw_exposure: 0,
+      test_reprocess_noise_reduction: 0,
+      test_tonemap_sequence: 0,
+      test_yuv_plus_dng: 0
+    }
   },
   {
     scene: "scene1_3",
-    tests: ["test_capture_result", "test_dng_noise_model", "test_ev_compensation", "test_exposure_time_priority", "test_jpeg", "test_raw_burst_sensitivity", "test_raw_sensitivity", "test_sensitivity_priority", "test_yuv_jpeg_all", "test_yuv_plus_jpeg", "test_yuv_plus_raw"]
+    tests: {
+      test_capture_result: 0,
+      test_dng_noise_model: 0,
+      test_ev_compensation: 0,
+      test_exposure_time_priority: 0,
+      test_jpeg: 0,
+      test_raw_burst_sensitivity: 0,
+      test_raw_sensitivity: 0,
+      test_sensitivity_priority: 0,
+      test_yuv_jpeg_all: 0,
+      test_yuv_plus_jpeg: 0,
+      test_yuv_plus_raw: 0
+    }
   },
   {
     scene: "scene2_a",
-    tests: ["test_display_p3", "test_effects", "test_exposure_keys_consistent", "test_format_combos", "test_num_faces", "test_reprocess_uv_swap"]
+    tests: {
+      test_display_p3: 0,
+      test_effects: 0,
+      test_exposure_keys_consistent: 0,
+      test_format_combos: 0,
+      test_num_faces: 0,
+      test_reprocess_uv_swap: 0
+    }
   },
   {
     scene: "scene2_b",
-    tests: ["test_preview_num_faces", "test_yuv_jpeg_capture_sameness"]
+    tests: {
+      test_preview_num_faces: 0,
+      test_yuv_jpeg_capture_sameness: 0
+    }
   },
   {
     scene: "scene2_c",
-    tests: ["test_camera_launch_perf_class", "test_default_camera_hdr", "test_jpeg_capture_perf_class", "test_num_faces"]
+    tests: {
+      test_camera_launch_perf_class: 0,
+      test_default_camera_hdr: 0,
+      test_jpeg_capture_perf_class: 0,
+      test_num_faces: 0
+    }
   },
   {
     scene: "scene2_d",
-    tests: ["test_autoframing", "test_num_faces", "test_preview_num_faces"]
+    tests: {
+      test_autoframing: 0,
+      test_num_faces: 0,
+      test_preview_num_faces: 0
+    }
   },
   {
     scene: "scene2_e",
-    tests: ["test_continuous_picture", "test_num_faces"]
+    tests: {
+      test_continuous_picture: 0,
+      test_num_faces: 0
+    }
   },
   {
     scene: "scene2_f",
-    tests: ["test_preview_num_faces"]
+    tests: {
+      test_preview_num_faces: 0
+    }
   },
   {
     scene: "scene2_g",
-    tests: ["test_preview_num_faces"]
+    tests: {
+      test_preview_num_faces: 0
+    }
   },
   {
     scene: "scene3",
-    tests: ["test_edge_enhancement", "test_flip_mirror", "test_imu_drift", "test_landscape_to_portrait", "test_lens_movement_reporting", "test_reprocess_edge_enhancement"]
+    tests: {
+      test_edge_enhancement: 0,
+      test_flip_mirror: 0,
+      test_imu_drift: 0,
+      test_landscape_to_portrait: 0,
+      test_lens_movement_reporting: 0,
+      test_reprocess_edge_enhancement: 0
+    }
   },
   {
     scene: "scene4",
-    tests: ["test_30_60fps_preview_fov_match", "test_aspect_ratio_and_crop", "test_multi_camera_alignment", "test_preview_aspect_ratio_and_crop", "test_preview_stabilization_fov", "test_video_aspect_ratio_and_crop"]
+    tests: {
+      test_30_60fps_preview_fov_match: 0,
+      test_aspect_ratio_and_crop: 0,
+      test_multi_camera_alignment: 0,
+      test_preview_aspect_ratio_and_crop: 0,
+      test_preview_stabilization_fov: 0,
+      test_video_aspect_ratio_and_crop: 0
+    }
   },
   {
     scene: "scene6",
-    tests: ["test_in_sensor_zoom", "test_low_latency_zoom", "test_preview_video_zoom_match", "test_preview_zoom", "test_session_characteristics_zoom", "test_zoom"]
+    tests: {
+      test_in_sensor_zoom: 0,
+      test_low_latency_zoom: 0,
+      test_preview_video_zoom_match: 0,
+      test_preview_zoom: 0,
+      test_session_characteristics_zoom: 0,
+      test_zoom: 0
+    }
   },
   {
     scene: "scene7",
-    tests: ["test_multi_camera_switch"]
+    tests: {
+      test_multi_camera_switch: 0
+    }
   },
   {
     scene: "scene8",
-    tests: ["test_ae_awb_regions", "test_color_correction_mode_cct"]
+    tests: {
+      test_ae_awb_regions: 0,
+      test_color_correction_mode_cct: 0
+    }
   },
   {
     scene: "scene9",
-    tests: ["test_jpeg_high_entropy", "test_jpeg_quality"]
+    tests: {
+      test_jpeg_high_entropy: 0,
+      test_jpeg_quality: 0
+    }
   },
   {
     scene: "scene_hdr",
-    tests: ["test_hdr_extension"]
+    tests: {
+      test_hdr_extension: 0
+    }
   },
   {
     scene: "scene_low_light",
-    tests: ["test_low_light_boost_extension", "test_night_extension"]
+    tests: {
+      test_low_light_boost_extension: 0,
+      test_night_extension: 0
+    }
   },
   {
     scene: "scene6_tele",
-    tests: ["test_preview_zoom_tele", "test_zoom_tele"]
+    tests: {
+      test_preview_zoom_tele: 0,
+      test_zoom_tele: 0
+    }
   },
   {
     scene: "scene7_tele",
-    tests: ["test_multi_camera_switch_tele"]
+    tests: {
+      test_multi_camera_switch_tele: 0
+    }
   },
   {
     scene: "scene_video",
-    tests: ["test_preview_frame_drop"]
+    tests: {
+      test_preview_frame_drop: 0
+    }
   }
 ];
 
@@ -264,47 +376,66 @@ async function refreshLiveState() {
 
 /**
  * TC 트리 렌더링 함수
+ * 테스트 구조(itsTestStructure)를 바탕으로 좌측 리스트를 렌더링합니다.
  */
 function renderTcTree() {
-    if (!tcListContainer) return;
-    tcListContainer.innerHTML = ""; 
+  const tcListContainer = document.querySelector("#tcList");
+  if (!tcListContainer) return;
+  
+  tcListContainer.innerHTML = "";
 
-    itsTestStructure.forEach((item) => {
-        const groupLi = document.createElement("li");
-        groupLi.className = "tc-group";
-        groupLi.innerHTML = `<span class="group-title">${item.scene}</span>`;
+  const statusMap = {
+    0: { text: "WAIT", className: "wait" },
+    1: { text: "PASS", className: "pass" },
+    2: { text: "SKIP", className: "skip" },
+    3: { text: "FAIL", className: "fail" }
+  };
 
-        const childUl = document.createElement("ul");
-        item.tests.forEach((rawTestName) => {
-            const formattedName = formatTcName(rawTestName); // 이름 변환 적용
-            const safeId = `${item.scene}-${rawTestName}`.replace(/\./g, "_"); // ID는 원본 이름 유지 (매핑용)
+  itsTestStructure.forEach((item) => {
+    const groupLi = document.createElement("li");
+    groupLi.className = "tc-group";
+    groupLi.innerHTML = `<span class="group-title">${item.scene}</span>`;
 
-            const tcLi = document.createElement("li");
-            tcLi.className = "tc-item";
-            tcLi.id = safeId;
-            tcLi.innerHTML = `
-                <span class="tc-name">${formattedName}</span>
-                <span class="tc-status">WAIT</span>
-            `;
-            childUl.appendChild(tcLi);
-        });
+    const childUl = document.createElement("ul");
+    childUl.className = "tc-list";
 
-        groupLi.appendChild(childUl);
-        tcListContainer.appendChild(groupLi);
+    Object.entries(item.tests).forEach(([rawName, statusValue]) => {
+      const formattedName = formatTcName(rawName);
+      const currentStatus = statusMap[statusValue] || statusMap[0];
+
+      const tcLi = document.createElement("li");
+      tcLi.className = "tc-item";
+      tcLi.innerHTML = `
+        <span class="tc-name">${formattedName}</span>
+        <span class="tc-status ${currentStatus.className}">${currentStatus.text}</span>
+      `;
+      childUl.appendChild(tcLi);
     });
+
+    groupLi.appendChild(childUl);
+    tcListContainer.appendChild(groupLi);
+  });
 }
 
-/**
- * TC 결과 업데이트 함수
- */
-function setTcResult(scene, testName, status) {
-  const targetId = `${scene}-${testName}`.replace(/\./g, "_");
-  const item = document.getElementById(targetId);
-  if (!item) return;
+// 페이지 로드 시 실행
+//document.addEventListener("DOMContentLoaded", renderTcTree);
 
-  const statusLabel = item.querySelector(".tc-status");
-  statusLabel.textContent = status.toUpperCase();
-  statusLabel.className = `tc-status ${status.toLowerCase()}`;
+async function updateStatus() {
+  try {
+    const response = await fetch('http://localhost:8765/its-status.json');
+    const newData = await response.json(); // 서버에서 온 [ {scene, tests}, ... ] 배열
+
+    if (newData && Array.isArray(newData)) {
+      // 1. 기존 리스트 구조를 서버에서 온 최신 데이터로 통째로 교체
+      itsTestStructure = newData; 
+      
+      // 2. 화면 다시 그리기
+      renderTcTree();
+      console.log("대시보드 리스트 갱신 완료");
+    }
+  } catch (error) {
+    console.error("데이터 수신 오류:", error);
+  }
 }
 
 // 2. 기존 초기화 로직 및 인터벌 유지
@@ -313,9 +444,9 @@ function init() {
   renderTcTree(); // TC 리스트업 실행
   updateMetrics();
   
-  // 멈췄던 인터벌들 재가동
   setInterval(updateClock, 1000);
   setInterval(updateMetrics, 900);
+  setInterval(updateStatus, 5000);
   
   // 데이터 폴링 시작 (엔드포인트가 있을 경우)
   if (typeof pollItsData === "function") {
