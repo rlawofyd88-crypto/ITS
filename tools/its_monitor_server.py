@@ -36,6 +36,10 @@ MASTER_STRUCTURE = [
     {"scene": "scene_video", "tests": ["test_preview_frame_drop"]}
 ]
 
+INTERVAL_PER_SCENE = 10
+SERVER_START_TIME = time.time()
+SCENE_ORDER = [item["scene"] for item in MASTER_STRUCTURE]
+
 STATUS_LINE_RE = re.compile(r"^(PASS|FAIL|SKIP)\s+", re.IGNORECASE)
 
 last_read_positions = {}
@@ -63,22 +67,34 @@ class ITSMonitor:
                         found_data[scene_name][test_name] = self.status_map.get(status, 0)
         return found_data
 
+    def get_allowed_scenes(self) -> List[str]:
+        elapsed = time.time() - SERVER_START_TIME
+        # 현재 경과 시간에 따라 오픈 가능한 Scene의 개수 계산
+        allowed_count = int(elapsed // INTERVAL_PER_SCENE) + 1
+        allowed_scenes = SCENE_ORDER[:allowed_count]
+        return allowed_scenes
+
     def get_updated_structure(self) -> List[Dict]:
         latest_dir = self.get_latest_dir()
         file_results = self.parse_summaries(latest_dir) if latest_dir else {}
+        allowed_scenes = self.get_allowed_scenes()
         
         updated_list = []
         for item in MASTER_STRUCTURE:
             scene_name = item["scene"]
             new_tests = {}
             for test_key in item["tests"]:
-                new_tests[test_key] = file_results.get(scene_name, {}).get(test_key, 0)
+                if scene_name in allowed_scenes:
+                    new_tests[test_key] = file_results.get(scene_name, {}).get(test_key, 0)
+                else:
+                    new_tests[test_key] = 0
             updated_list.append({"scene": scene_name, "tests": new_tests})
         return updated_list
 
     # [이식] adapter에서 검증된 통계 점수화 산출 로직
     def generate_analysis_data(self) -> Dict[str, Any]:
         latest_dir = self.get_latest_dir()
+        allowed_scenes = self.get_allowed_scenes()
         
         pass_count = 0
         fail_count = 0
@@ -95,6 +111,10 @@ class ITSMonitor:
         if latest_dir:
             summary_files = sorted(latest_dir.rglob("scene_test_summary.txt"))
             for summary_file in summary_files:
+                scene_name = summary_file.parent.name
+                # 가상 타임라인에 도달하지 않은 요약 파일은 파싱에서 제외합니다.
+                if scene_name not in allowed_scenes:
+                    continue
                 try:
                     lines = summary_file.read_text(encoding="utf-8", errors="ignore").splitlines()
                     for line in lines:
