@@ -201,7 +201,7 @@ class ItsHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serve Camera ITS output as dashboard JSON.")
-    parser.add_argument("--results-dir", required=True, type=Path, help="Camera ITS output directory to watch.")
+    parser.add_argument("--results-dir", default="/tmp", type=Path, help="Camera ITS output directory to watch.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     args = parser.parse_args()

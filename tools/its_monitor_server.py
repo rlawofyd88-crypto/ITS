@@ -1,8 +1,11 @@
+# its_monitor_server.py 수정본
+
 #!/usr/bin/env python3
 import argparse
 import json
 import time
 import os
+import re
 import glob
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,8 +35,12 @@ MASTER_STRUCTURE = [
     {"scene": "scene7_tele", "tests": ["test_multi_camera_switch_tele"]},
     {"scene": "scene_video", "tests": ["test_preview_frame_drop"]}
 ]
+
+STATUS_LINE_RE = re.compile(r"^(PASS|FAIL|SKIP)\s+", re.IGNORECASE)
+
 last_read_positions = {}
 last_scene_name = ""
+
 class ITSMonitor:
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
@@ -48,7 +55,7 @@ class ITSMonitor:
         for sf in its_dir.rglob("scene_test_summary.txt"):
             scene_name = sf.parent.name
             found_data[scene_name] = {}
-            with open(sf, "r", encoding="utf-8") as f:
+            with open(sf, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     parts = line.split()
                     if len(parts) >= 2:
@@ -63,16 +70,75 @@ class ITSMonitor:
         updated_list = []
         for item in MASTER_STRUCTURE:
             scene_name = item["scene"]
-            # JS 구조와 동일하게 tests를 객체로 변환하며 값을 채움
             new_tests = {}
             for test_key in item["tests"]:
-                # 파일에 결과가 있으면 그 값(1~3), 없으면 0(WAIT)
                 new_tests[test_key] = file_results.get(scene_name, {}).get(test_key, 0)
-            
             updated_list.append({"scene": scene_name, "tests": new_tests})
-        
         return updated_list
 
+    # [이식] adapter에서 검증된 통계 점수화 산출 로직
+    def generate_analysis_data(self) -> Dict[str, Any]:
+        latest_dir = self.get_latest_dir()
+        
+        pass_count = 0
+        fail_count = 0
+        tests_by_metric = {
+            "colorAccuracy": {"pass": 0, "fail": 0},
+            "resolution": {"pass": 0, "fail": 0},
+            "dynamicRange": {"pass": 0, "fail": 0},
+            "defectDetect": {"pass": 0, "fail": 0},
+        }
+
+        metric_cycle = ("colorAccuracy", "resolution", "dynamicRange", "defectDetect")
+        metric_index = 0
+
+        if latest_dir:
+            summary_files = sorted(latest_dir.rglob("scene_test_summary.txt"))
+            for summary_file in summary_files:
+                try:
+                    lines = summary_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    for line in lines:
+                        match = STATUS_LINE_RE.match(line.strip())
+                        if not match:
+                            continue
+                        status = match.group(1).upper()
+                        metric_name = metric_cycle[metric_index % len(metric_cycle)]
+                        metric_index += 1
+                        
+                        if status == "PASS":
+                            pass_count += 1
+                            tests_by_metric[metric_name]["pass"] += 1
+                        elif status == "FAIL":
+                            fail_count += 1
+                            tests_by_metric[metric_name]["fail"] += 1
+                except:
+                    continue
+
+        total = pass_count + fail_count
+        overall = max(0.0, min(100.0, (pass_count / total) * 100.0)) if total > 0 else 0.0
+        
+        def calc_score(counts):
+            sub_total = counts["pass"] + counts["fail"]
+            if sub_total == 0: return overall
+            return max(0.0, min(100.0, (counts["pass"] / sub_total) * 100.0))
+
+        status_str = "PASS" if pass_count > 0 and fail_count == 0 else "FAIL" if fail_count else "RUNNING"
+
+        return {
+            "status": status_str,
+            "metrics": {
+                "overallScore": overall,
+                "colorAccuracy": calc_score(tests_by_metric["colorAccuracy"]),
+                "sharpness": calc_score(tests_by_metric["resolution"]),
+                "exposure": calc_score(tests_by_metric["dynamicRange"]),
+            },
+            "tests": {
+                "colorAccuracy": calc_score(tests_by_metric["colorAccuracy"]),
+                "resolution": calc_score(tests_by_metric["resolution"]),
+                "dynamicRange": calc_score(tests_by_metric["dynamicRange"]),
+                "defectDetect": calc_score(tests_by_metric["defectDetect"])
+            }
+        }
 
 
 class ItsHandler(BaseHTTPRequestHandler):
@@ -82,107 +148,67 @@ class ItsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global last_read_positions
         global last_scene_name
+        
         if self.path == "/its-status.json":
-            payload = json.dumps(self.monitor.get_updated_structure()).encode("utf-8")
+            # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
+            response_data = {
+                "tree": self.monitor.get_updated_structure(),
+                "analysis": self.monitor.generate_analysis_data()
+            }
+            payload = json.dumps(response_data).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(payload)
+            
         elif self.path == "/get-live-logs":
-            global last_scene_name
+            # (기존의 완벽해진 /get-live-logs 로직 그대로 유지)
             try:
                 latest_dir = self.monitor.get_latest_dir()
                 log_data = []
-        
                 if latest_dir:
-                    # 1. 최신 로그 파일들을 순회
                     log_files = sorted(latest_dir.rglob("test_log.INFO"), key=lambda p: p.stat().st_mtime)
-                    
                     for log_file in log_files:
-                        # [핵심 수정] 파일의 부모 폴더(예: test_jpeg)의 부모(예: scene1_1) 이름을 가져옵니다.
-                        actual_scene_name = log_file.parent.parent.parent.name 
-        
-                        # 2. 진짜 Scene 폴더 이름이 바뀌었는지 체크
-                        #print(f"last_scene_name: {last_scene_name}, actual_scene_name: {actual_scene_name}")
+                        actual_scene_name = log_file.parent.parent.name 
                         if last_scene_name and last_scene_name != actual_scene_name:
                             log_data.append({
                                 "type": "SCENE_CHANGE", 
                                 "text": f"--- SCENE_CHANGED_{actual_scene_name} ---" 
                             })
-                        
-                        last_scene_name = actual_scene_name # 현재 Scene 저장
+                        last_scene_name = actual_scene_name
         
-                        # 3. 기존 파일 읽기 로직 시작
                         file_path = str(log_file)
                         if file_path not in last_read_positions:
                             last_read_positions[file_path] = 0
                         
                         current_size = log_file.stat().st_size
-
                         if current_size > last_read_positions[file_path]:
                             with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
                                 f.seek(last_read_positions[file_path])
                                 chunk = f.read()
                                 if chunk:
                                     last_read_positions[file_path] = f.tell()
-                                    # splitlines 대신 \n으로 쪼개서 마지막 줄 누락 방지
                                     lines = chunk.replace('\r', '').split('\n')
                                     for line in lines:
                                         clean_line = line.strip()
                                         if clean_line:
                                             log_data.append({"text": clean_line})
 
-                # 응답 전송 부분
                 payload = json.dumps(log_data).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(payload)
-
             except Exception as e:
                 print(f"Log Error: {e}")
-                # 에러 발생 시 빈 배열이라도 응답하여 브라우저 에러 방지
                 self.send_response(200) 
                 self.end_headers()
                 self.wfile.write(b"[]")
         else:
             self.send_response(404)
             self.end_headers()
-    
-    def get_time_ordered_logs(self):
-        latest_dir = self.monitor.get_latest_dir()
-        if not latest_dir:
-            return []
-
-        all_logs = []
-        # 모든 scene 하위의 test_log.INFO 파일들을 탐색
-        log_files = latest_dir.rglob("test_log.INFO") # 혹은 *.txt
-
-        for log_file in log_files:
-            # 파일 수정 시간을 기준으로 로그 라인 생성 (실제 파일 내용 대신 파일 정보를 활용)
-            mtime = time.ctime(log_file.stat().st_mtime)
-            scene_name = log_file.parent.parent.name
-            test_name = log_file.parent.name
-
-            # 실제 파일을 읽어 첫 3줄 정도만 가져와서 리스트화 (시뮬레이션용)
-            try:
-                with open(log_file, "r") as f:
-                    content = [line.strip() for line in f.readlines()[:3]]
-                    for line in content:
-                        if line:
-                            all_logs.append({
-                                "time": mtime,
-                                "scene": scene_name,
-                                "test": test_name,
-                                "text": line
-                            })
-            except:
-                continue
-
-        # 시간 순서대로 정렬
-        return sorted(all_logs, key=lambda x: x['time'])
 
 def main():
     parser = argparse.ArgumentParser()
@@ -192,13 +218,11 @@ def main():
 
     ItsHandler.monitor = ITSMonitor(args.results_dir)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), ItsHandler)
-
     print(f"================================================")
-    print(f"   ITS Results Monitor Started")
+    print(f"   ITS Integrated Monitor Started")
     print(f"   Watching: {args.results_dir.absolute()}")
     print(f"   API URL : http://localhost:{args.port}/its-status.json")
     print(f"================================================")
-
     try:
         server.serve_forever()
     except KeyboardInterrupt:

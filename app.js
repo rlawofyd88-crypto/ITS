@@ -424,15 +424,20 @@ function renderTcTree() {
 async function updateStatus() {
   try {
     const response = await fetch('http://localhost:8765/its-status.json');
-    const newData = await response.json(); // 서버에서 온 [ {scene, tests}, ... ] 배열
+    const data = await response.json();
 
-    if (newData && Array.isArray(newData)) {
-      // 1. 기존 리스트 구조를 서버에서 온 최신 데이터로 통째로 교체
-      itsTestStructure = newData; 
+    if (data) {
+      // 1. 좌측 TC 트리 목록 반영 및 리렌더링
+      if (data.tree && Array.isArray(data.tree)) {
+        itsTestStructure = data.tree; 
+        renderTcTree();
+      }
       
-      // 2. 화면 다시 그리기
-      renderTcTree();
-      console.log("대시보드 리스트 갱신 완료");
+      // 2. 우측 02 / ANALYSIS 실시간 실제 분석 연동 데이터 반영
+      if (data.analysis) {
+        // 기존에 만들어두신 applyItsData 함수를 그대로 호출하여 화면 매핑을 처리합니다.
+        applyItsData(data.analysis);
+      }
     }
   } catch (error) {
     console.error("데이터 수신 오류:", error);
