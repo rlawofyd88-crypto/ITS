@@ -213,6 +213,17 @@ h2 {
   background: var(--cyan);
 }
 
+.run-badge {
+  max-width: min(320px, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-badge.waiting {
+  background: rgba(246, 244, 239, 0.35);
+}
+
 .device-frame {
   position: relative;
   min-height: 0;

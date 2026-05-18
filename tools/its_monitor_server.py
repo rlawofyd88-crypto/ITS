@@ -591,6 +591,10 @@ class ItsHandler(BaseHTTPRequestHandler):
             response_data = {
                 "tree": self.monitor.get_updated_structure(file_results),
                 "analysis": self.monitor.generate_analysis_data(file_results),
+                "run": {
+                    "name": latest_dir.name if latest_dir else "",
+                    "path": str(latest_dir) if latest_dir else "",
+                },
                 "capture": self.monitor.get_capture_info()
             }
             payload = json.dumps(response_data).encode("utf-8")

@@ -19,6 +19,7 @@ const dutMirror = document.querySelector("#dutMirror");
 const liveCaption = document.querySelector("#liveCaption");
 const liveBadge = document.querySelector("#liveBadge");
 const cameraScene = document.querySelector("#cameraScene");
+const runNameBadge = document.querySelector("#runNameBadge");
 
 const tcListContainer = document.querySelector("#tcList");
 
@@ -309,6 +310,17 @@ function applyItsData(data) {
   setBadge(data.status);
 }
 
+function applyRunInfo(runInfo) {
+  if (!runNameBadge) {
+    return;
+  }
+
+  const runName = runInfo?.name || "CameraITS_*";
+  runNameBadge.textContent = runName;
+  runNameBadge.title = runInfo?.path || runName;
+  runNameBadge.classList.toggle("waiting", !runInfo?.name);
+}
+
 function applyCaptureInfo(capture) {
   if (!capture) {
     return false;
@@ -531,6 +543,8 @@ function renderTcTree() {
 //document.addEventListener("DOMContentLoaded", renderTcTree);
 
 function applyDashboardData(data, { scrollFocusedTc = false } = {}) {
+  applyRunInfo(data.run);
+
   if (data.capture) {
     setCurrentTcFocus(data.capture);
   }
