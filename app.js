@@ -1,7 +1,4 @@
 const clock = document.querySelector("#clock");
-const fpsValue = document.querySelector("#fpsValue");
-const latencyValue = document.querySelector("#latencyValue");
-const frameValue = document.querySelector("#frameValue");
 const scoreValue = document.querySelector("#scoreValue");
 const colorValue = document.querySelector("#colorValue");
 const sharpnessValue = document.querySelector("#sharpnessValue");
@@ -241,11 +238,11 @@ let itsTestStructure = [
 ];
 
 let needsClear = false;
-let frame = 41280;
 let externalDataActive = false;
 const params = new URLSearchParams(window.location.search);
 const dataEndpoint = params.get("data");
-const liveFeedPath = params.get("feed") || "./data/live-demo-frame.png";
+const monitorEndpoint = params.get("monitor") || "http://localhost:8765";
+const liveFeedPath = params.get("feed") || `${monitorEndpoint}/latest-capture-image`;
 const liveStatePath = params.get("live_state") || "./data/live-demo-state.json";
 let liveFeedObjectUrl = null;
 
@@ -264,11 +261,6 @@ function jitter(base, spread, digits = 1) {
 }
 
 function updateMetrics() {
-  frame += Math.floor(28 + Math.random() * 5);
-  fpsValue.textContent = jitter(30, 1.4);
-  latencyValue.textContent = `${Math.round(38 + Math.random() * 12)} ms`;
-  frameValue.textContent = String(frame).padStart(6, "0");
-
   if (externalDataActive) {
     return;
   }
@@ -313,6 +305,16 @@ function applyItsData(data) {
   setBadge(data.status);
 }
 
+function applyCaptureInfo(capture) {
+  if (!capture || !capture.available) {
+    return;
+  }
+
+  liveCaption.textContent = capture.fileName || "Latest CameraITS capture";
+  liveCaption.title = capture.relativePath || capture.fileName || "";
+  liveBadge.textContent = "CAPTURE";
+}
+
 async function pollItsData() {
   if (!dataEndpoint) {
     return;
@@ -352,11 +354,17 @@ async function refreshLiveFeed() {
     dutMirror.onerror = () => {
       URL.revokeObjectURL(nextUrl);
       cameraScene.classList.remove("has-live-feed");
+      liveCaption.textContent = "Waiting for CameraITS capture image...";
+      liveCaption.title = "";
+      liveBadge.textContent = "WAIT";
     };
     dutMirror.src = nextUrl;
     cameraScene.classList.add("has-live-feed");
   } catch (error) {
     cameraScene.classList.remove("has-live-feed");
+    liveCaption.textContent = "Waiting for CameraITS capture image...";
+    liveCaption.title = "";
+    liveBadge.textContent = "WAIT";
   }
 }
 
@@ -423,7 +431,7 @@ function renderTcTree() {
 
 async function updateStatus() {
   try {
-    const response = await fetch('http://localhost:8765/its-status.json');
+    const response = await fetch(`${monitorEndpoint}/its-status.json`, { cache: "no-store" });
     const data = await response.json();
 
     if (data) {
@@ -438,6 +446,10 @@ async function updateStatus() {
         // 기존에 만들어두신 applyItsData 함수를 그대로 호출하여 화면 매핑을 처리합니다.
         applyItsData(data.analysis);
       }
+
+      if (data.capture) {
+        applyCaptureInfo(data.capture);
+      }
     }
   } catch (error) {
     console.error("데이터 수신 오류:", error);
@@ -450,7 +462,7 @@ let isPausing = false;
 
 async function fetchLiveLogs() {
     try {
-        const response = await fetch('http://localhost:8765/get-live-logs');
+        const response = await fetch(`${monitorEndpoint}/get-live-logs`, { cache: "no-store" });
         const logs = await response.json();
         
         logs.forEach(log => {
@@ -531,6 +543,8 @@ function init() {
   setInterval(updateMetrics, 900);
   setInterval(updateStatus, 3000);
   setInterval(fetchLiveLogs, 5000); // 5초마다 서버에서 새 로그 가져옴
+  refreshLiveFeed();
+  setInterval(refreshLiveFeed, 1500);
   
   // 데이터 폴링 시작 (엔드포인트가 있을 경우)
   if (typeof pollItsData === "function") {

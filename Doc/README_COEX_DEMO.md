@@ -29,40 +29,34 @@
 Google Camera ITS는 Android CTS의 `cts/apps/CameraITS`에서 실행하는 호스트 기반 테스트입니다. 실제 연동은 아래처럼 분리하는 것을 권장합니다.
 
 1. Google Camera ITS 실행: `python tools/run_all_tests.py`
-2. ITS 결과 폴더 생성 확인
-3. `tools/its_dashboard_adapter.py`가 결과 폴더의 `.txt`, `.log` 파일을 읽어 `its-status.json` 제공
-4. 대시보드는 `?data=` 파라미터로 해당 JSON을 주기적으로 읽어 그래프를 갱신
+2. WSL 기준 `/tmp/CameraITS_*` 결과 폴더 생성 확인
+3. `tools/its_monitor_server.py`가 `/tmp`의 최신 결과 폴더를 읽어 `its-status.json`, 로그, 최신 캡처 이미지를 제공
+4. 대시보드는 해당 API를 주기적으로 읽어 그래프와 `03 / Test Capture` 이미지를 갱신
 
 예시:
 
-```powershell
-python .\tools\its_dashboard_adapter.py --results-dir "C:\path\to\camera_its_results"
-```
-
-브라우저 주소:
-
-```text
-C:\Users\jr.kim\Desktop\ITS\index.html?data=http://127.0.0.1:8765/its-status.json
+```bash
+python3 tools/its_monitor_server.py
 ```
 
 실제 연동 시에는 브라우저 보안 정책 차이를 피하기 위해 대시보드 폴더도 로컬 서버로 띄우는 것을 권장합니다.
 
-```powershell
-python -m http.server 8080
+```bash
+python3 -m http.server 8080
 ```
 
 브라우저 주소:
 
 ```text
-http://127.0.0.1:8080/index.html?data=http://127.0.0.1:8765/its-status.json
+http://127.0.0.1:8080/index.html
 ```
 
 데이터 계약은 `data/sample-its-status.json`을 기준으로 합니다.
 
 실제 실행 결과를 정적 JSON으로 반영하고 싶다면:
 
-```powershell
-python .\tools\export_its_status.py --results-dir "C:\path\to\CameraITS_result_dir" --output ".\data\latest-its-status.json"
+```bash
+python3 tools/export_its_status.py --results-dir "/tmp/CameraITS_result_dir" --output "./data/latest-its-status.json"
 ```
 
 브라우저 주소:

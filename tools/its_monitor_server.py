@@ -7,9 +7,11 @@ import time
 import os
 import re
 import glob
+import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, List, Dict
+from urllib.parse import urlparse
 
 MASTER_STRUCTURE = [
     {"scene": "scene0", "tests": ["test_jitter", "test_metadata", "test_request_capture_match", "test_sensor_events", "test_solid_color_test_pattern", "test_test_patterns", "test_tonemap_curve", "test_unified_timestamps", "test_vibration_restriction"]},
@@ -41,6 +43,7 @@ SERVER_START_TIME = time.time()
 SCENE_ORDER = [item["scene"] for item in MASTER_STRUCTURE]
 
 STATUS_LINE_RE = re.compile(r"^(PASS|FAIL|SKIP)\s+", re.IGNORECASE)
+IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 
 last_read_positions = {}
 last_scene_name = ""
@@ -51,8 +54,63 @@ class ITSMonitor:
         self.status_map = {"PASS": 1, "SKIP": 2, "FAIL": 3}
 
     def get_latest_dir(self) -> Path | None:
-        candidates = [p for p in self.root_dir.glob("CameraITS_*") if p.is_dir()]
-        return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
+        candidates = []
+        for path in self.root_dir.glob("CameraITS_*"):
+            if not path.is_dir():
+                continue
+            try:
+                candidates.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
+        return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+    def get_latest_image(self, its_dir: Path | None = None) -> Path | None:
+        search_dir = its_dir or self.get_latest_dir()
+        if not search_dir:
+            return None
+
+        candidates = []
+        for image_path in search_dir.rglob("*"):
+            if not image_path.is_file() or image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            try:
+                candidates.append((image_path.stat().st_mtime, image_path))
+            except OSError:
+                continue
+
+        return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+    def get_capture_info(self) -> Dict[str, Any]:
+        latest_dir = self.get_latest_dir()
+        if not latest_dir:
+            return {
+                "available": False,
+                "imageUrl": "/latest-capture-image",
+                "message": "Waiting for a CameraITS result folder.",
+            }
+
+        image_path = self.get_latest_image(latest_dir)
+        if not image_path:
+            return {
+                "available": False,
+                "imageUrl": "/latest-capture-image",
+                "sourceDir": str(latest_dir),
+                "message": "Waiting for an image in the latest CameraITS result folder.",
+            }
+
+        try:
+            updated_at = image_path.stat().st_mtime
+        except OSError:
+            updated_at = time.time()
+
+        return {
+            "available": True,
+            "imageUrl": "/latest-capture-image",
+            "fileName": image_path.name,
+            "relativePath": str(image_path.relative_to(latest_dir)).replace("\\", "/"),
+            "sourceDir": str(latest_dir),
+            "updatedAt": updated_at,
+        }
 
     def parse_summaries(self, its_dir: Path) -> Dict[str, Dict[str, int]]:
         found_data = {}
@@ -168,21 +226,52 @@ class ItsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global last_read_positions
         global last_scene_name
+
+        request_path = urlparse(self.path).path
         
-        if self.path == "/its-status.json":
+        if request_path == "/its-status.json":
             # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
             response_data = {
                 "tree": self.monitor.get_updated_structure(),
-                "analysis": self.monitor.generate_analysis_data()
+                "analysis": self.monitor.generate_analysis_data(),
+                "capture": self.monitor.get_capture_info()
             }
             payload = json.dumps(response_data).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(payload)
             
-        elif self.path == "/get-live-logs":
+        elif request_path == "/latest-capture-image":
+            image_path = self.monitor.get_latest_image()
+            if not image_path:
+                self.send_response(404)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+
+            try:
+                payload = image_path.read_bytes()
+            except OSError:
+                self.send_response(404)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+
+            content_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        elif request_path == "/get-live-logs":
             # (기존의 완벽해진 /get-live-logs 로직 그대로 유지)
             try:
                 latest_dir = self.monitor.get_latest_dir()

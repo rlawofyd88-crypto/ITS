@@ -118,6 +118,10 @@ h2 {
   color: var(--muted);
   font-size: 18px;
   font-weight: 600;
+  max-width: min(42vw, 520px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   line-height: 1.35;
 }
 
@@ -168,8 +172,15 @@ h2 {
 .analytics-panel,
 .compare-panel {
   display: grid;
-  grid-template-rows: auto 1fr auto;
   gap: 16px;
+}
+
+.analytics-panel {
+  grid-template-rows: auto 1fr auto;
+}
+
+.compare-panel {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .panel-heading {
@@ -340,20 +351,12 @@ h2 {
   background: var(--accent);
 }
 
-.live-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-
-.live-metrics div,
 .summary-list div {
   padding: 14px;
   border: 1px solid rgba(246, 244, 239, 0.12);
   background: rgba(255, 255, 255, 0.055);
 }
 
-.live-metrics span,
 .summary-list span,
 .score-ring span,
 .bar-row span,
@@ -361,12 +364,6 @@ h2 {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
-}
-
-.live-metrics strong {
-  display: block;
-  margin-top: 4px;
-  font-size: 26px;
 }
 
 .score-row {

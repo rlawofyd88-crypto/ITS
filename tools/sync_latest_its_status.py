@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 
@@ -47,7 +46,7 @@ def write_status(output: Path, results_dir: Path | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync newest CameraITS run to dashboard JSON.")
-    parser.add_argument("--temp-root", default=os.environ.get("LOCALAPPDATA", "") + "\\Temp", type=Path)
+    parser.add_argument("--temp-root", default="/tmp", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--interval", default=2.0, type=float)
     args = parser.parse_args()
