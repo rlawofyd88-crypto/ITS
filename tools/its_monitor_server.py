@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 from typing import Any, List, Dict
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 MASTER_STRUCTURE = [
     {"scene": "scene0", "tests": ["test_jitter", "test_metadata", "test_request_capture_match", "test_sensor_events", "test_solid_color_test_pattern", "test_test_patterns", "test_tonemap_curve", "test_unified_timestamps", "test_vibration_restriction"]},
@@ -57,9 +57,6 @@ TEST_NAME_ALIASES = {
 }
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 
-last_read_positions = {}
-last_scene_name = ""
-
 class ITSMonitor:
     def __init__(self, root_dir: Path, replay_interval: float = 1.0):
         self.root_dir = root_dir
@@ -68,7 +65,11 @@ class ITSMonitor:
         self.active_run_key = ""
         self.visible_results: Dict[str, Dict[str, int]] = {}
         self.pending_results: List[Dict[str, Any]] = []
+        self.published_events: List[Dict[str, Any]] = []
+        self.current_event: Dict[str, Any] | None = None
         self.last_replay_emit_at: float | None = None
+        self.replay_sequence = 0
+        self.log_scene_name = ""
         self.replay_lock = Lock()
 
     def status_value(self, status: str) -> int:
@@ -76,6 +77,12 @@ class ITSMonitor:
         if normalized == "ERROR":
             normalized = "FAIL"
         return self.status_map.get(normalized, 0)
+
+    def status_text(self, status_value: int) -> str:
+        for status, value in self.status_map.items():
+            if value == status_value:
+                return status
+        return "WAIT"
 
     def path_mtime(self, path: Path) -> float:
         try:
@@ -106,7 +113,11 @@ class ITSMonitor:
         self.active_run_key = run_key
         self.visible_results = {}
         self.pending_results = []
+        self.published_events = []
+        self.current_event = None
         self.last_replay_emit_at = None
+        self.replay_sequence = 0
+        self.log_scene_name = ""
 
     def copy_visible_results(self) -> Dict[str, Dict[str, int]]:
         return {
@@ -122,6 +133,8 @@ class ITSMonitor:
         status: int,
         completed_at: float,
         source_group: int,
+        artifact_dir: Path | None = None,
+        log_file: Path | None = None,
     ) -> None:
         if not scene_name or not status:
             return
@@ -137,11 +150,23 @@ class ITSMonitor:
             "status": status,
             "completedAt": completed_at,
             "sourceGroup": source_group,
+            "artifactDir": str(artifact_dir) if artifact_dir else "",
+            "logFile": str(log_file) if log_file else "",
         }
         previous = events.get(event_key)
         if previous is None:
             events[event_key] = event
             return
+
+        if not previous.get("artifactDir") and event.get("artifactDir"):
+            previous["artifactDir"] = event["artifactDir"]
+        if not previous.get("logFile") and event.get("logFile"):
+            previous["logFile"] = event["logFile"]
+
+        if not event.get("artifactDir") and previous.get("artifactDir"):
+            event["artifactDir"] = previous["artifactDir"]
+        if not event.get("logFile") and previous.get("logFile"):
+            event["logFile"] = previous["logFile"]
 
         if event["sourceGroup"] < previous["sourceGroup"]:
             events[event_key] = event
@@ -177,22 +202,41 @@ class ITSMonitor:
 
         return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
+    def get_current_event(self) -> Dict[str, Any] | None:
+        with self.replay_lock:
+            return dict(self.current_event) if self.current_event else None
+
+    def get_event_image(self, event: Dict[str, Any] | None = None) -> Path | None:
+        current_event = event or self.get_current_event()
+        if not current_event:
+            return None
+
+        artifact_dir = current_event.get("artifactDir")
+        if not artifact_dir:
+            return None
+
+        return self.get_latest_image(Path(artifact_dir))
+
     def get_capture_info(self) -> Dict[str, Any]:
-        latest_dir = self.get_latest_dir()
-        if not latest_dir:
+        current_event = self.get_current_event()
+        if not current_event:
             return {
                 "available": False,
                 "imageUrl": "/latest-capture-image",
-                "message": "Waiting for a CameraITS result folder.",
+                "message": "Waiting for a CameraITS TC result.",
             }
 
-        image_path = self.get_latest_image(latest_dir)
+        artifact_dir = Path(current_event["artifactDir"]) if current_event.get("artifactDir") else None
+        image_path = self.get_event_image(current_event)
         if not image_path:
             return {
                 "available": False,
                 "imageUrl": "/latest-capture-image",
-                "sourceDir": str(latest_dir),
-                "message": "Waiting for an image in the latest CameraITS result folder.",
+                "scene": current_event["scene"],
+                "test": current_event["test"],
+                "sequence": current_event.get("sequence", 0),
+                "sourceDir": str(artifact_dir) if artifact_dir else "",
+                "message": "No capture image for the current CameraITS TC.",
             }
 
         try:
@@ -204,8 +248,11 @@ class ITSMonitor:
             "available": True,
             "imageUrl": "/latest-capture-image",
             "fileName": image_path.name,
-            "relativePath": str(image_path.relative_to(latest_dir)).replace("\\", "/"),
-            "sourceDir": str(latest_dir),
+            "scene": current_event["scene"],
+            "test": current_event["test"],
+            "sequence": current_event.get("sequence", 0),
+            "relativePath": str(image_path.relative_to(artifact_dir)).replace("\\", "/") if artifact_dir else image_path.name,
+            "sourceDir": str(artifact_dir) if artifact_dir else "",
             "updatedAt": updated_at,
         }
 
@@ -248,6 +295,7 @@ class ITSMonitor:
                 self.status_value(result_match.group(1)),
                 completed_at,
                 source_group=0,
+                artifact_dir=summary_file.parent,
             )
         return sorted(events.values(), key=self.result_sort_key)
 
@@ -267,6 +315,8 @@ class ITSMonitor:
                 self.status_value(match.group(2)),
                 completed_at,
                 source_group=0,
+                artifact_dir=log_file.parent,
+                log_file=log_file,
             )
         return sorted(events.values(), key=self.result_sort_key)
 
@@ -285,6 +335,8 @@ class ITSMonitor:
                     event["status"],
                     event["completedAt"],
                     event["sourceGroup"],
+                    artifact_dir=Path(event["artifactDir"]) if event.get("artifactDir") else None,
+                    log_file=Path(event["logFile"]) if event.get("logFile") else None,
                 )
 
         for summary_file in its_dir.rglob("test_summary.yaml"):
@@ -299,6 +351,8 @@ class ITSMonitor:
                     event["status"],
                     event["completedAt"],
                     event["sourceGroup"],
+                    artifact_dir=Path(event["artifactDir"]) if event.get("artifactDir") else None,
+                    log_file=Path(event["logFile"]) if event.get("logFile") else None,
                 )
 
         for scene_summary in its_dir.rglob("scene_test_summary.txt"):
@@ -325,6 +379,78 @@ class ITSMonitor:
 
         return sorted(events.values(), key=self.result_sort_key)
 
+    def publish_event(self, event: Dict[str, Any]) -> None:
+        self.replay_sequence += 1
+        published_event = dict(event)
+        published_event["sequence"] = self.replay_sequence
+        self.visible_results.setdefault(published_event["scene"], {})[published_event["test"]] = published_event["status"]
+        self.current_event = published_event
+        self.published_events.append(published_event)
+
+    def read_event_log_lines(self, event: Dict[str, Any]) -> List[str]:
+        log_file = event.get("logFile")
+        if not log_file:
+            return [f"[Test] {event['test']} {self.status_text(event['status'])}"]
+
+        try:
+            text = Path(log_file).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return [f"[Test] {event['test']} {self.status_text(event['status'])}"]
+
+        return [
+            line.strip()
+            for line in text.replace("\r", "").split("\n")
+            if line.strip()
+        ]
+
+    def get_released_log_data(self, since_sequence: int = 0) -> List[Dict[str, Any]]:
+        with self.replay_lock:
+            if since_sequence > self.replay_sequence:
+                since_sequence = 0
+
+            previous_scene = ""
+            for event in self.published_events:
+                if event.get("sequence", 0) <= since_sequence:
+                    previous_scene = event["scene"]
+                else:
+                    break
+
+            released_events = [
+                dict(event)
+                for event in self.published_events
+                if event.get("sequence", 0) > since_sequence
+            ]
+
+            log_items = []
+            for event in released_events:
+                if previous_scene and previous_scene != event["scene"]:
+                    log_items.append({
+                        "type": "SCENE_CHANGE",
+                        "id": f"scene:{event.get('sequence', 0)}:{event['scene']}",
+                        "sequence": event.get("sequence", 0),
+                        "text": f"--- SCENE_CHANGED_{event['scene']} ---",
+                    })
+                previous_scene = event["scene"]
+                log_items.append({"type": "TC_LOG", "event": event})
+
+        log_data = []
+        for item in log_items:
+            if item.get("type") == "SCENE_CHANGE":
+                log_data.append(item)
+                continue
+
+            event = item["event"]
+            event_prefix = f"{event.get('sequence', 0)}:{event['scene']}:{event['test']}"
+            for line_index, line in enumerate(self.read_event_log_lines(event)):
+                log_data.append({
+                    "id": f"{event_prefix}:{line_index}",
+                    "sequence": event.get("sequence", 0),
+                    "scene": event["scene"],
+                    "test": event["test"],
+                    "text": line,
+                })
+        return log_data
+
     def release_pending_results(self) -> None:
         if not self.pending_results:
             return
@@ -333,7 +459,7 @@ class ITSMonitor:
         if self.replay_interval == 0:
             while self.pending_results:
                 event = self.pending_results.pop(0)
-                self.visible_results.setdefault(event["scene"], {})[event["test"]] = event["status"]
+                self.publish_event(event)
             self.last_replay_emit_at = now
             return
 
@@ -341,7 +467,7 @@ class ITSMonitor:
             return
 
         event = self.pending_results.pop(0)
-        self.visible_results.setdefault(event["scene"], {})[event["test"]] = event["status"]
+        self.publish_event(event)
         self.last_replay_emit_at = now
 
     def get_replayed_tc_results(self, its_dir: Path) -> Dict[str, Dict[str, int]]:
@@ -455,10 +581,8 @@ class ItsHandler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
 
     def do_GET(self):
-        global last_read_positions
-        global last_scene_name
-
-        request_path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        request_path = parsed_url.path
         
         if request_path == "/its-status.json":
             latest_dir = self.monitor.get_latest_dir()
@@ -478,7 +602,7 @@ class ItsHandler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
             
         elif request_path == "/latest-capture-image":
-            image_path = self.monitor.get_latest_image()
+            image_path = self.monitor.get_event_image()
             if not image_path:
                 self.send_response(404)
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -505,38 +629,14 @@ class ItsHandler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
 
         elif request_path == "/get-live-logs":
-            # (기존의 완벽해진 /get-live-logs 로직 그대로 유지)
             try:
-                latest_dir = self.monitor.get_latest_dir()
-                log_data = []
-                if latest_dir:
-                    log_files = sorted(latest_dir.rglob("test_log.INFO"), key=lambda p: p.stat().st_mtime)
-                    for log_file in log_files:
-                        actual_scene_name = log_file.parent.parent.name 
-                        if last_scene_name and last_scene_name != actual_scene_name:
-                            log_data.append({
-                                "type": "SCENE_CHANGE", 
-                                "text": f"--- SCENE_CHANGED_{actual_scene_name} ---" 
-                            })
-                        last_scene_name = actual_scene_name
-        
-                        file_path = str(log_file)
-                        if file_path not in last_read_positions:
-                            last_read_positions[file_path] = 0
-                        
-                        current_size = log_file.stat().st_size
-                        if current_size > last_read_positions[file_path]:
-                            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                                f.seek(last_read_positions[file_path])
-                                chunk = f.read()
-                                if chunk:
-                                    last_read_positions[file_path] = f.tell()
-                                    lines = chunk.replace('\r', '').split('\n')
-                                    for line in lines:
-                                        clean_line = line.strip()
-                                        if clean_line:
-                                            log_data.append({"text": clean_line})
+                query = parse_qs(parsed_url.query)
+                try:
+                    since_sequence = int(query.get("since", ["0"])[0])
+                except (TypeError, ValueError):
+                    since_sequence = 0
 
+                log_data = self.monitor.get_released_log_data(since_sequence)
                 payload = json.dumps(log_data).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

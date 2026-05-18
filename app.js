@@ -245,6 +245,10 @@ const monitorEndpoint = params.get("monitor") || "http://localhost:8765";
 const liveFeedPath = params.get("feed") || `${monitorEndpoint}/latest-capture-image`;
 const liveStatePath = params.get("live_state") || "./data/live-demo-state.json";
 let liveFeedObjectUrl = null;
+let currentCaptureKey = "";
+let lastAppliedCaptureSequence = 0;
+let statusUpdateInProgress = false;
+let currentTcFocus = { scene: "", test: "" };
 
 function updateClock() {
   const now = new Date();
@@ -306,13 +310,97 @@ function applyItsData(data) {
 }
 
 function applyCaptureInfo(capture) {
-  if (!capture || !capture.available) {
-    return;
+  if (!capture) {
+    return false;
+  }
+
+  const captureKey = `${capture.sequence || 0}:${capture.scene || ""}:${capture.test || ""}:${capture.fileName || ""}`;
+  const changed = captureKey !== currentCaptureKey;
+  currentCaptureKey = captureKey;
+
+  if (!capture.available) {
+    liveCaption.textContent = capture.test ? `${capture.test} / No capture image` : "Waiting for CameraITS capture image...";
+    liveCaption.title = capture.message || "";
+    liveBadge.textContent = capture.test ? "NO IMG" : "WAIT";
+    return changed;
   }
 
   liveCaption.textContent = capture.fileName || "Latest CameraITS capture";
-  liveCaption.title = capture.relativePath || capture.fileName || "";
+  liveCaption.title = capture.relativePath || capture.fileName || capture.test || "";
   liveBadge.textContent = "CAPTURE";
+  return changed;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isFocusedTc(sceneName, testName) {
+  return currentTcFocus.scene === sceneName && currentTcFocus.test === testName;
+}
+
+function applyCurrentTcFocus({ scroll = false, behavior = "smooth" } = {}) {
+  const treeContainer = document.querySelector("#tcTreeContainer");
+  if (!treeContainer || !currentTcFocus.scene || !currentTcFocus.test) {
+    return;
+  }
+
+  let focusedItem = null;
+  treeContainer.querySelectorAll(".tc-item").forEach((tcItem) => {
+    const matches = isFocusedTc(tcItem.dataset.scene, tcItem.dataset.test);
+    tcItem.classList.toggle("tc-focused", matches);
+    if (matches) {
+      tcItem.setAttribute("aria-current", "step");
+      focusedItem = tcItem;
+    } else {
+      tcItem.removeAttribute("aria-current");
+    }
+  });
+
+  if (!scroll || !focusedItem) {
+    return;
+  }
+
+  requestAnimationFrame(() => {
+    const containerRect = treeContainer.getBoundingClientRect();
+    const itemRect = focusedItem.getBoundingClientRect();
+    const itemTop = itemRect.top - containerRect.top + treeContainer.scrollTop;
+    const centeredTop = itemTop - (treeContainer.clientHeight - itemRect.height) / 2;
+
+    treeContainer.scrollTo({
+      top: Math.max(0, centeredTop),
+      behavior
+    });
+  });
+}
+
+function setCurrentTcFocus(capture, options = {}) {
+  const sceneName = capture?.scene || "";
+  const testName = capture?.test || "";
+  if (!sceneName || !testName) {
+    return false;
+  }
+
+  const changed = !isFocusedTc(sceneName, testName);
+  currentTcFocus = { scene: sceneName, test: testName };
+  applyCurrentTcFocus({
+    scroll: Boolean(options.scroll),
+    behavior: options.behavior || (changed ? "smooth" : "auto")
+  });
+  return changed;
+}
+
+async function waitForLogOutput(logCount) {
+  const minimumDelay = logCount > 0
+    ? Math.min(1800, Math.max(450, logCount * 110))
+    : 250;
+  const startedAt = Date.now();
+
+  await sleep(minimumDelay);
+
+  while ((logQueue.length > 0 || isPausing) && Date.now() - startedAt < 2500) {
+    await sleep(100);
+  }
 }
 
 async function pollItsData() {
@@ -349,22 +437,29 @@ async function refreshLiveFeed() {
         URL.revokeObjectURL(liveFeedObjectUrl);
       }
       liveFeedObjectUrl = nextUrl;
+      dutMirror.classList.remove("hidden");
       cameraScene.classList.add("has-live-feed");
     };
     dutMirror.onerror = () => {
       URL.revokeObjectURL(nextUrl);
+      if (liveFeedObjectUrl) {
+        URL.revokeObjectURL(liveFeedObjectUrl);
+        liveFeedObjectUrl = null;
+      }
+      dutMirror.removeAttribute("src");
+      dutMirror.classList.add("hidden");
       cameraScene.classList.remove("has-live-feed");
-      liveCaption.textContent = "Waiting for CameraITS capture image...";
-      liveCaption.title = "";
-      liveBadge.textContent = "WAIT";
     };
     dutMirror.src = nextUrl;
     cameraScene.classList.add("has-live-feed");
   } catch (error) {
+    if (liveFeedObjectUrl) {
+      URL.revokeObjectURL(liveFeedObjectUrl);
+      liveFeedObjectUrl = null;
+    }
+    dutMirror.removeAttribute("src");
+    dutMirror.classList.add("hidden");
     cameraScene.classList.remove("has-live-feed");
-    liveCaption.textContent = "Waiting for CameraITS capture image...";
-    liveCaption.title = "";
-    liveBadge.textContent = "WAIT";
   }
 }
 
@@ -414,6 +509,12 @@ function renderTcTree() {
 
       const tcLi = document.createElement("li");
       tcLi.className = "tc-item";
+      tcLi.dataset.scene = item.scene;
+      tcLi.dataset.test = rawName;
+      if (isFocusedTc(item.scene, rawName)) {
+        tcLi.classList.add("tc-focused");
+        tcLi.setAttribute("aria-current", "step");
+      }
       tcLi.innerHTML = `
         <span class="tc-name">${formattedName}</span>
         <span class="tc-status ${currentStatus.className}">${currentStatus.text}</span>
@@ -429,54 +530,118 @@ function renderTcTree() {
 // 페이지 로드 시 실행
 //document.addEventListener("DOMContentLoaded", renderTcTree);
 
+function applyDashboardData(data, { scrollFocusedTc = false } = {}) {
+  if (data.capture) {
+    setCurrentTcFocus(data.capture);
+  }
+
+  // 1. 좌측 TC 트리 목록 반영 및 리렌더링
+  if (data.tree && Array.isArray(data.tree)) {
+    itsTestStructure = data.tree;
+    renderTcTree();
+    applyCurrentTcFocus({ scroll: scrollFocusedTc, behavior: "auto" });
+  }
+
+  // 2. 우측 02 / ANALYSIS 실시간 실제 분석 연동 데이터 반영
+  if (data.analysis) {
+    // 기존에 만들어두신 applyItsData 함수를 그대로 호출하여 화면 매핑을 처리합니다.
+    applyItsData(data.analysis);
+  }
+
+  if (data.capture) {
+    const captureChanged = applyCaptureInfo(data.capture);
+    if (captureChanged) {
+      refreshLiveFeed();
+    }
+    lastAppliedCaptureSequence = Number(data.capture.sequence || lastAppliedCaptureSequence);
+  }
+}
+
 async function updateStatus() {
+  if (statusUpdateInProgress) {
+    return;
+  }
+
+  statusUpdateInProgress = true;
+
   try {
     const response = await fetch(`${monitorEndpoint}/its-status.json`, { cache: "no-store" });
     const data = await response.json();
 
     if (data) {
-      // 1. 좌측 TC 트리 목록 반영 및 리렌더링
-      if (data.tree && Array.isArray(data.tree)) {
-        itsTestStructure = data.tree; 
-        renderTcTree();
-      }
-      
-      // 2. 우측 02 / ANALYSIS 실시간 실제 분석 연동 데이터 반영
-      if (data.analysis) {
-        // 기존에 만들어두신 applyItsData 함수를 그대로 호출하여 화면 매핑을 처리합니다.
-        applyItsData(data.analysis);
+      const captureSequence = Number(data.capture?.sequence || 0);
+      const hasNewCapture = captureSequence && captureSequence > lastAppliedCaptureSequence;
+      if (hasNewCapture) {
+        setCurrentTcFocus(data.capture, { scroll: true });
+        syncLogSequenceToCapture(data.capture);
+        const logCount = await fetchLiveLogs();
+        await waitForLogOutput(logCount);
       }
 
-      if (data.capture) {
-        applyCaptureInfo(data.capture);
-      }
+      applyDashboardData(data, { scrollFocusedTc: hasNewCapture });
     }
   } catch (error) {
     console.error("데이터 수신 오류:", error);
+  } finally {
+    statusUpdateInProgress = false;
   }
 }
 
 let logQueue = [];
 let renderedLogs = new Set(); // 이미 화면에 표시된 로그 저장 (중복 방지)
 let isPausing = false;
+let lastLogSequence = 0;
+
+function clearLogViewer() {
+    const logViewer = document.getElementById("logViewer");
+    if (logViewer) {
+        logViewer.innerHTML = "";
+    }
+    logQueue = [];
+    renderedLogs.clear();
+    needsClear = false;
+    isPausing = false;
+}
+
+function syncLogSequenceToCapture(capture) {
+    const captureSequence = Number(capture?.sequence || 0);
+    if (!captureSequence || captureSequence <= lastLogSequence + 1) {
+        return;
+    }
+
+    lastLogSequence = captureSequence - 1;
+    clearLogViewer();
+}
 
 async function fetchLiveLogs() {
     try {
-        const response = await fetch(`${monitorEndpoint}/get-live-logs`, { cache: "no-store" });
+        const response = await fetch(`${monitorEndpoint}/get-live-logs?since=${lastLogSequence}`, { cache: "no-store" });
         const logs = await response.json();
+        let queuedCount = 0;
         
         logs.forEach(log => {
+            if (Number.isFinite(log.sequence)) {
+                lastLogSequence = Math.max(lastLogSequence, log.sequence);
+            }
+
             if (log.type === "SCENE_CHANGE") {
                 logQueue.push(log); // 플래그는 무조건 큐에 삽입
+                queuedCount += 1;
             } else {
+                const logKey = log.id || log.text;
                 // 일반 로그만 중복 체크
-                if (!renderedLogs.has(log.text) || log.text.includes("Test results:")) {
+                if (!renderedLogs.has(logKey) || log.text.includes("Test results:")) {
                     logQueue.push(log);
-                    renderedLogs.add(log.text);
+                    renderedLogs.add(logKey);
+                    queuedCount += 1;
                 }
             }
         });
-    } catch (e) { console.error(e); }
+        return queuedCount;
+    } catch (e) {
+        console.error(e);
+        return 0;
+    }
 }
 
 function startLogSimulation() {
@@ -541,11 +706,11 @@ function init() {
   startLogSimulation();
   setInterval(updateClock, 1000);
   setInterval(updateMetrics, 900);
-  updateStatus();
+  updateStatus().then(fetchLiveLogs);
   setInterval(updateStatus, 1000);
-  setInterval(fetchLiveLogs, 5000); // 5초마다 서버에서 새 로그 가져옴
+  setInterval(fetchLiveLogs, 1000); // TC replay와 맞춰 1초마다 서버에서 새 로그 가져옴
   refreshLiveFeed();
-  setInterval(refreshLiveFeed, 1500);
+  setInterval(refreshLiveFeed, 1000);
   
   // 데이터 폴링 시작 (엔드포인트가 있을 경우)
   if (typeof pollItsData === "function") {
