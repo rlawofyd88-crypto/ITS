@@ -224,6 +224,33 @@ h2 {
   background: rgba(246, 244, 239, 0.35);
 }
 
+.camera-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.camera-tabs.hidden {
+  display: none;
+}
+
+.camera-tab {
+  border: 1px solid rgba(246, 244, 239, 0.22);
+  background: rgba(246, 244, 239, 0.08);
+  color: var(--text);
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.camera-tab.active {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #06110c;
+}
+
 .device-frame {
   position: relative;
   min-height: 0;

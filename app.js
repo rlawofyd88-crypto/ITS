@@ -20,6 +20,7 @@ const liveCaption = document.querySelector("#liveCaption");
 const liveBadge = document.querySelector("#liveBadge");
 const cameraScene = document.querySelector("#cameraScene");
 const runNameBadge = document.querySelector("#runNameBadge");
+const cameraTabs = document.querySelector("#cameraTabs");
 
 const tcListContainer = document.querySelector("#tcList");
 
@@ -243,13 +244,27 @@ let externalDataActive = false;
 const params = new URLSearchParams(window.location.search);
 const dataEndpoint = params.get("data");
 const monitorEndpoint = params.get("monitor") || "http://localhost:8765";
+const hasCustomLiveFeed = params.has("feed");
 const liveFeedPath = params.get("feed") || `${monitorEndpoint}/latest-capture-image`;
 const liveStatePath = params.get("live_state") || "./data/live-demo-state.json";
+const TC_STATUS_POLL_MS = 500;
+const LOG_POLL_MS = 500;
+const LOG_RENDER_INTERVAL_MS = 16;
+const LOG_RESULT_PAUSE_MS = 60;
+const LOG_OUTPUT_MAX_WAIT_MS = 420;
+const LOG_OUTPUT_IDLE_SLEEP_MS = 20;
+const LOG_OUTPUT_EMPTY_DELAY_MS = 40;
 let liveFeedObjectUrl = null;
 let currentCaptureKey = "";
 let lastAppliedCaptureSequence = 0;
 let statusUpdateInProgress = false;
-let currentTcFocus = { scene: "", test: "" };
+let currentTcFocus = { cameraId: "", scene: "", test: "" };
+let cameraList = [];
+let knownCameraIds = [];
+let selectedCameraId = "";
+let cameraTrees = {};
+let cameraAnalyses = {};
+let cameraCaptures = {};
 
 function updateClock() {
   const now = new Date();
@@ -321,23 +336,136 @@ function applyRunInfo(runInfo) {
   runNameBadge.classList.toggle("waiting", !runInfo?.name);
 }
 
+function getCameraIdList(cameras) {
+  return (Array.isArray(cameras) ? cameras : [])
+    .map((camera) => camera?.id || "")
+    .filter(Boolean);
+}
+
+function renderCameraTabs() {
+  if (!cameraTabs) {
+    return;
+  }
+
+  cameraTabs.innerHTML = "";
+  if (!cameraList.length) {
+    cameraTabs.classList.add("hidden");
+    return;
+  }
+
+  cameraTabs.classList.remove("hidden");
+  cameraList.forEach((camera) => {
+    const cameraId = camera.id;
+    const tabButton = document.createElement("button");
+    tabButton.type = "button";
+    tabButton.className = "camera-tab";
+    tabButton.textContent = camera.label || cameraId;
+    tabButton.dataset.cameraId = cameraId;
+    tabButton.classList.toggle("active", cameraId === selectedCameraId);
+    tabButton.setAttribute("aria-pressed", cameraId === selectedCameraId ? "true" : "false");
+    tabButton.addEventListener("click", () => {
+      selectedCameraId = cameraId;
+      renderCameraTabs();
+      applySelectedCameraData({ scrollFocusedTc: true });
+    });
+    cameraTabs.appendChild(tabButton);
+  });
+}
+
+function applyCameraState(data, { followActive = false } = {}) {
+  const nextCameraList = Array.isArray(data.cameras) ? data.cameras : [];
+  const nextCameraIds = getCameraIdList(nextCameraList);
+  const newCameraIds = nextCameraIds.filter((cameraId) => !knownCameraIds.includes(cameraId));
+  const activeCameraId = data.capture?.cameraId || data.activeCameraId || "";
+
+  cameraList = nextCameraList;
+  knownCameraIds = nextCameraIds;
+  cameraTrees = data.cameraTrees || {};
+  cameraAnalyses = data.cameraAnalysis || {};
+  cameraCaptures = data.cameraCaptures || {};
+
+  if (!selectedCameraId || !nextCameraIds.includes(selectedCameraId)) {
+    selectedCameraId = activeCameraId || nextCameraIds[0] || "";
+  }
+
+  if (newCameraIds.length > 0) {
+    selectedCameraId = activeCameraId && newCameraIds.includes(activeCameraId)
+      ? activeCameraId
+      : newCameraIds[newCameraIds.length - 1];
+  }
+
+  if (followActive && activeCameraId && nextCameraIds.includes(activeCameraId)) {
+    selectedCameraId = activeCameraId;
+  }
+
+  renderCameraTabs();
+}
+
+function getSelectedTree(data) {
+  if (selectedCameraId && cameraTrees[selectedCameraId]) {
+    return cameraTrees[selectedCameraId];
+  }
+  return Array.isArray(data.tree) ? data.tree : itsTestStructure;
+}
+
+function getSelectedAnalysis(data) {
+  if (selectedCameraId && cameraAnalyses[selectedCameraId]) {
+    return cameraAnalyses[selectedCameraId];
+  }
+  return data.analysis || null;
+}
+
+function getSelectedCapture(data) {
+  if (selectedCameraId && cameraCaptures[selectedCameraId]) {
+    return cameraCaptures[selectedCameraId];
+  }
+  return data.capture || null;
+}
+
+function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
+  const selectedTree = getSelectedTree(data);
+  if (Array.isArray(selectedTree)) {
+    itsTestStructure = selectedTree;
+    renderTcTree();
+    applyCurrentTcFocus({ scroll: scrollFocusedTc, behavior: "auto" });
+  }
+
+  const selectedAnalysis = getSelectedAnalysis(data);
+  if (selectedAnalysis) {
+    applyItsData(selectedAnalysis);
+  }
+
+  const selectedCapture = getSelectedCapture(data);
+  if (selectedCapture) {
+    const captureChanged = applyCaptureInfo(selectedCapture);
+    if (captureChanged) {
+      refreshLiveFeed();
+    }
+    lastAppliedCaptureSequence = Math.max(
+      lastAppliedCaptureSequence,
+      Number(selectedCapture.sequence || 0)
+    );
+  }
+}
+
 function applyCaptureInfo(capture) {
   if (!capture) {
     return false;
   }
 
-  const captureKey = `${capture.sequence || 0}:${capture.scene || ""}:${capture.test || ""}:${capture.fileName || ""}`;
+  const captureKey = `${capture.sequence || 0}:${capture.cameraId || ""}:${capture.scene || ""}:${capture.test || ""}:${capture.fileName || ""}`;
   const changed = captureKey !== currentCaptureKey;
   currentCaptureKey = captureKey;
 
+  const cameraPrefix = capture.cameraId ? `${capture.cameraId} / ` : "";
   if (!capture.available) {
-    liveCaption.textContent = capture.test ? `${capture.test} / No capture image` : "Waiting for CameraITS capture image...";
+    liveCaption.textContent = capture.test ? `${cameraPrefix}${capture.test} / No capture image` : "Waiting for CameraITS capture image...";
     liveCaption.title = capture.message || "";
     liveBadge.textContent = capture.test ? "NO IMG" : "WAIT";
     return changed;
   }
 
-  liveCaption.textContent = capture.fileName || "Latest CameraITS capture";
+  liveCaption.textContent = `${cameraPrefix}${capture.fileName || "Latest CameraITS capture"}`;
   liveCaption.title = capture.relativePath || capture.fileName || capture.test || "";
   liveBadge.textContent = "CAPTURE";
   return changed;
@@ -347,8 +475,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isFocusedTc(sceneName, testName) {
-  return currentTcFocus.scene === sceneName && currentTcFocus.test === testName;
+function isFocusedTc(sceneName, testName, cameraId = selectedCameraId) {
+  return currentTcFocus.cameraId === cameraId &&
+    currentTcFocus.scene === sceneName &&
+    currentTcFocus.test === testName;
 }
 
 function applyCurrentTcFocus({ scroll = false, behavior = "smooth" } = {}) {
@@ -359,7 +489,7 @@ function applyCurrentTcFocus({ scroll = false, behavior = "smooth" } = {}) {
 
   let focusedItem = null;
   treeContainer.querySelectorAll(".tc-item").forEach((tcItem) => {
-    const matches = isFocusedTc(tcItem.dataset.scene, tcItem.dataset.test);
+    const matches = isFocusedTc(tcItem.dataset.scene, tcItem.dataset.test, tcItem.dataset.cameraId);
     tcItem.classList.toggle("tc-focused", matches);
     if (matches) {
       tcItem.setAttribute("aria-current", "step");
@@ -387,14 +517,15 @@ function applyCurrentTcFocus({ scroll = false, behavior = "smooth" } = {}) {
 }
 
 function setCurrentTcFocus(capture, options = {}) {
+  const cameraId = capture?.cameraId || selectedCameraId || "";
   const sceneName = capture?.scene || "";
   const testName = capture?.test || "";
   if (!sceneName || !testName) {
     return false;
   }
 
-  const changed = !isFocusedTc(sceneName, testName);
-  currentTcFocus = { scene: sceneName, test: testName };
+  const changed = !isFocusedTc(sceneName, testName, cameraId);
+  currentTcFocus = { cameraId, scene: sceneName, test: testName };
   applyCurrentTcFocus({
     scroll: Boolean(options.scroll),
     behavior: options.behavior || (changed ? "smooth" : "auto")
@@ -404,14 +535,14 @@ function setCurrentTcFocus(capture, options = {}) {
 
 async function waitForLogOutput(logCount) {
   const minimumDelay = logCount > 0
-    ? Math.min(1800, Math.max(450, logCount * 110))
-    : 250;
+    ? Math.min(LOG_OUTPUT_MAX_WAIT_MS, Math.max(32, logCount * LOG_RENDER_INTERVAL_MS))
+    : LOG_OUTPUT_EMPTY_DELAY_MS;
   const startedAt = Date.now();
 
   await sleep(minimumDelay);
 
-  while ((logQueue.length > 0 || isPausing) && Date.now() - startedAt < 2500) {
-    await sleep(100);
+  while ((logQueue.length > 0 || isPausing) && Date.now() - startedAt < LOG_OUTPUT_MAX_WAIT_MS) {
+    await sleep(LOG_OUTPUT_IDLE_SLEEP_MS);
   }
 }
 
@@ -435,7 +566,12 @@ async function pollItsData() {
 
 async function refreshLiveFeed() {
   try {
-    const response = await fetch(`${liveFeedPath}?t=${Date.now()}`, { cache: "no-store" });
+    const feedParams = new URLSearchParams({ t: String(Date.now()) });
+    if (!hasCustomLiveFeed && selectedCameraId) {
+      feedParams.set("camera", selectedCameraId);
+    }
+    const separator = liveFeedPath.includes("?") ? "&" : "?";
+    const response = await fetch(`${liveFeedPath}${separator}${feedParams.toString()}`, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Live feed returned ${response.status}`);
     }
@@ -521,9 +657,10 @@ function renderTcTree() {
 
       const tcLi = document.createElement("li");
       tcLi.className = "tc-item";
+      tcLi.dataset.cameraId = selectedCameraId;
       tcLi.dataset.scene = item.scene;
       tcLi.dataset.test = rawName;
-      if (isFocusedTc(item.scene, rawName)) {
+      if (isFocusedTc(item.scene, rawName, selectedCameraId)) {
         tcLi.classList.add("tc-focused");
         tcLi.setAttribute("aria-current", "step");
       }
@@ -542,33 +679,15 @@ function renderTcTree() {
 // 페이지 로드 시 실행
 //document.addEventListener("DOMContentLoaded", renderTcTree);
 
-function applyDashboardData(data, { scrollFocusedTc = false } = {}) {
+function applyDashboardData(data, { scrollFocusedTc = false, followActiveCamera = false } = {}) {
   applyRunInfo(data.run);
+  applyCameraState(data, { followActive: followActiveCamera });
 
   if (data.capture) {
     setCurrentTcFocus(data.capture);
   }
 
-  // 1. 좌측 TC 트리 목록 반영 및 리렌더링
-  if (data.tree && Array.isArray(data.tree)) {
-    itsTestStructure = data.tree;
-    renderTcTree();
-    applyCurrentTcFocus({ scroll: scrollFocusedTc, behavior: "auto" });
-  }
-
-  // 2. 우측 02 / ANALYSIS 실시간 실제 분석 연동 데이터 반영
-  if (data.analysis) {
-    // 기존에 만들어두신 applyItsData 함수를 그대로 호출하여 화면 매핑을 처리합니다.
-    applyItsData(data.analysis);
-  }
-
-  if (data.capture) {
-    const captureChanged = applyCaptureInfo(data.capture);
-    if (captureChanged) {
-      refreshLiveFeed();
-    }
-    lastAppliedCaptureSequence = Number(data.capture.sequence || lastAppliedCaptureSequence);
-  }
+  applySelectedCameraData({ data, scrollFocusedTc });
 }
 
 async function updateStatus() {
@@ -586,13 +705,17 @@ async function updateStatus() {
       const captureSequence = Number(data.capture?.sequence || 0);
       const hasNewCapture = captureSequence && captureSequence > lastAppliedCaptureSequence;
       if (hasNewCapture) {
+        applyCameraState(data, { followActive: true });
         setCurrentTcFocus(data.capture, { scroll: true });
         syncLogSequenceToCapture(data.capture);
         const logCount = await fetchLiveLogs();
         await waitForLogOutput(logCount);
       }
 
-      applyDashboardData(data, { scrollFocusedTc: hasNewCapture });
+      applyDashboardData(data, {
+        scrollFocusedTc: hasNewCapture,
+        followActiveCamera: hasNewCapture
+      });
     }
   } catch (error) {
     console.error("데이터 수신 오류:", error);
@@ -660,33 +783,32 @@ async function fetchLiveLogs() {
 
 function startLogSimulation() {
     const logViewer = document.getElementById("logViewer");
-    
-    const logInterval = setInterval(() => {
-        if (isPausing || logQueue.length === 0) return;
+
+    setInterval(() => {
+        if (isPausing || logQueue.length === 0 || !logViewer) return;
 
         const log = logQueue.shift();
 
         // 1. Scene 변경 플래그를 만났을 때
         if (log.type === "SCENE_CHANGE") {
             // 바로 비우지 않고, "다음에 로그가 들어오면 비워라"라고 예약만 합니다.
-            needsClear = true; 
-            console.log("다음 Scene 로그 유입 시 화면을 초기화합니다.");
-            return; 
+            needsClear = true;
+            return;
         }
 
         // 2. 실제 로그를 출력하기 직전, 비우기 예약이 되어 있다면?
         if (needsClear) {
             logViewer.innerHTML = ""; // 여기서 비웁니다!
-            renderedLogs.clear();    
+            renderedLogs.clear();
             needsClear = false;       // 예약 해제
-            console.log("새 Scene 시작을 위해 이전 로그를 클리어했습니다.");
         }
 
         // 3. 기존 출력 로직 시작
         const logLine = document.createElement("div");
         logLine.className = "log-line-raw";
-        
-        let text = log.text;
+
+        const rawText = log.text;
+        let text = rawText;
 
         if (text.includes("==========>")) {
             text = `<b style="color: #ffca28; font-size: 1.1em;">${text}</b>`;
@@ -700,16 +822,16 @@ function startLogSimulation() {
         logViewer.appendChild(logLine);
         logViewer.scrollTop = logViewer.scrollHeight;
 
-        if (text.includes("Test results:")) {
+        if (rawText.includes("Test results:")) {
             isPausing = true;
-            setTimeout(() => { isPausing = false; }, 1000);
+            setTimeout(() => { isPausing = false; }, LOG_RESULT_PAUSE_MS);
         }
-        
+
         // 성능 유지용
-        if (logViewer.childElementCount > 300) {
+        while (logViewer.childElementCount > 300) {
             logViewer.removeChild(logViewer.firstChild);
         }
-    }, 100);
+    }, LOG_RENDER_INTERVAL_MS);
 }
 
 // 2. 기존 초기화 로직 및 인터벌 유지
@@ -721,10 +843,10 @@ function init() {
   setInterval(updateClock, 1000);
   setInterval(updateMetrics, 900);
   updateStatus().then(fetchLiveLogs);
-  setInterval(updateStatus, 1000);
-  setInterval(fetchLiveLogs, 1000); // TC replay와 맞춰 1초마다 서버에서 새 로그 가져옴
+  setInterval(updateStatus, TC_STATUS_POLL_MS);
+  setInterval(fetchLiveLogs, LOG_POLL_MS);
   refreshLiveFeed();
-  setInterval(refreshLiveFeed, 1000);
+  setInterval(refreshLiveFeed, TC_STATUS_POLL_MS);
   
   // 데이터 폴링 시작 (엔드포인트가 있을 경우)
   if (typeof pollItsData === "function") {
