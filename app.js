@@ -541,7 +541,8 @@ function init() {
   startLogSimulation();
   setInterval(updateClock, 1000);
   setInterval(updateMetrics, 900);
-  setInterval(updateStatus, 3000);
+  updateStatus();
+  setInterval(updateStatus, 1000);
   setInterval(fetchLiveLogs, 5000); // 5초마다 서버에서 새 로그 가져옴
   refreshLiveFeed();
   setInterval(refreshLiveFeed, 1500);

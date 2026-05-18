@@ -4,12 +4,11 @@
 import argparse
 import json
 import time
-import os
 import re
-import glob
 import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 from typing import Any, List, Dict
 from urllib.parse import urlparse
 
@@ -38,20 +37,118 @@ MASTER_STRUCTURE = [
     {"scene": "scene_video", "tests": ["test_preview_frame_drop"]}
 ]
 
-INTERVAL_PER_SCENE = 10
-SERVER_START_TIME = time.time()
 SCENE_ORDER = [item["scene"] for item in MASTER_STRUCTURE]
+SCENE_INDEX = {scene: index for index, scene in enumerate(SCENE_ORDER)}
+TEST_INDEX = {
+    (item["scene"], test_name): index
+    for item in MASTER_STRUCTURE
+    for index, test_name in enumerate(item["tests"])
+}
 
 STATUS_LINE_RE = re.compile(r"^(PASS|FAIL|SKIP)\s+", re.IGNORECASE)
+TEST_NAME_RE = re.compile(r"^\s*Test Name:\s*(test_[A-Za-z0-9_]+)\s*$", re.IGNORECASE | re.MULTILINE)
+TEST_RESULT_RE = re.compile(r"^\s*Result:\s*(PASS|FAIL|SKIP|ERROR)\s*$", re.IGNORECASE | re.MULTILINE)
+TEST_RECORD_RE = re.compile(r"^\s*Type:\s*Record\s*$", re.IGNORECASE | re.MULTILINE)
+TEST_END_TIME_RE = re.compile(r"^\s*End Time:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
+TEST_LOG_RESULT_RE = re.compile(r"\[Test\]\s+(test_[A-Za-z0-9_]+)\s+(PASS|FAIL|SKIP|ERROR)\b", re.IGNORECASE)
+TEST_NAME_ALIASES = {
+    ("scene1_1", "test_ae_precapture"): "test_ae_precapture_trigger",
+    ("scene1_3", "test_sensor_sensitivity_priority"): "test_sensitivity_priority",
+}
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 
 last_read_positions = {}
 last_scene_name = ""
 
 class ITSMonitor:
-    def __init__(self, root_dir: Path):
+    def __init__(self, root_dir: Path, replay_interval: float = 1.0):
         self.root_dir = root_dir
+        self.replay_interval = max(0.0, replay_interval)
         self.status_map = {"PASS": 1, "SKIP": 2, "FAIL": 3}
+        self.active_run_key = ""
+        self.visible_results: Dict[str, Dict[str, int]] = {}
+        self.pending_results: List[Dict[str, Any]] = []
+        self.last_replay_emit_at: float | None = None
+        self.replay_lock = Lock()
+
+    def status_value(self, status: str) -> int:
+        normalized = status.upper()
+        if normalized == "ERROR":
+            normalized = "FAIL"
+        return self.status_map.get(normalized, 0)
+
+    def path_mtime(self, path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def normalize_test_name(self, scene_name: str, test_name: str) -> str:
+        return TEST_NAME_ALIASES.get((scene_name, test_name), test_name)
+
+    def result_sort_key(self, event: Dict[str, Any]):
+        return (
+            event["completedAt"],
+            SCENE_INDEX.get(event["scene"], 999),
+            TEST_INDEX.get((event["scene"], event["test"]), 999),
+            event["test"],
+        )
+
+    def reset_replay(self, its_dir: Path) -> None:
+        try:
+            run_key = str(its_dir.resolve())
+        except OSError:
+            run_key = str(its_dir)
+
+        if run_key == self.active_run_key:
+            return
+
+        self.active_run_key = run_key
+        self.visible_results = {}
+        self.pending_results = []
+        self.last_replay_emit_at = None
+
+    def copy_visible_results(self) -> Dict[str, Dict[str, int]]:
+        return {
+            scene_name: dict(scene_results)
+            for scene_name, scene_results in self.visible_results.items()
+        }
+
+    def add_result_event(
+        self,
+        events: Dict[tuple[str, str], Dict[str, Any]],
+        scene_name: str | None,
+        test_name: str,
+        status: int,
+        completed_at: float,
+        source_group: int,
+    ) -> None:
+        if not scene_name or not status:
+            return
+
+        normalized_test_name = self.normalize_test_name(scene_name, test_name)
+        event_key = (scene_name, normalized_test_name)
+        if event_key not in TEST_INDEX:
+            return
+
+        event = {
+            "scene": scene_name,
+            "test": normalized_test_name,
+            "status": status,
+            "completedAt": completed_at,
+            "sourceGroup": source_group,
+        }
+        previous = events.get(event_key)
+        if previous is None:
+            events[event_key] = event
+            return
+
+        if event["sourceGroup"] < previous["sourceGroup"]:
+            events[event_key] = event
+            return
+
+        if event["sourceGroup"] == previous["sourceGroup"] and event["completedAt"] < previous["completedAt"]:
+            events[event_key] = event
 
     def get_latest_dir(self) -> Path | None:
         candidates = []
@@ -112,47 +209,190 @@ class ITSMonitor:
             "updatedAt": updated_at,
         }
 
-    def parse_summaries(self, its_dir: Path) -> Dict[str, Dict[str, int]]:
-        found_data = {}
-        for sf in its_dir.rglob("scene_test_summary.txt"):
-            scene_name = sf.parent.name
-            found_data[scene_name] = {}
-            with open(sf, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        status, test_name = parts[0].upper(), parts[1].replace(".py", "")
-                        found_data[scene_name][test_name] = self.status_map.get(status, 0)
-        return found_data
+    def get_scene_name_from_path(self, path: Path, its_dir: Path) -> str | None:
+        try:
+            path_parts = path.relative_to(its_dir).parts
+        except ValueError:
+            path_parts = path.parts
 
-    def get_allowed_scenes(self) -> List[str]:
-        elapsed = time.time() - SERVER_START_TIME
-        # 현재 경과 시간에 따라 오픈 가능한 Scene의 개수 계산
-        allowed_count = int(elapsed // INTERVAL_PER_SCENE) + 1
-        allowed_scenes = SCENE_ORDER[:allowed_count]
-        return allowed_scenes
+        for part in path_parts:
+            if part in SCENE_ORDER:
+                return part
+        return None
 
-    def get_updated_structure(self) -> List[Dict]:
-        latest_dir = self.get_latest_dir()
-        file_results = self.parse_summaries(latest_dir) if latest_dir else {}
-        allowed_scenes = self.get_allowed_scenes()
+    def parse_test_summary_events(self, summary_file: Path, scene_name: str) -> List[Dict[str, Any]]:
+        try:
+            text = summary_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return []
+
+        fallback_time = self.path_mtime(summary_file)
+        events = {}
+        for doc in re.split(r"(?m)^---\s*$", text):
+            if not TEST_RECORD_RE.search(doc):
+                continue
+            name_match = TEST_NAME_RE.search(doc)
+            result_match = TEST_RESULT_RE.search(doc)
+            if not name_match or not result_match:
+                continue
+
+            completed_at = fallback_time
+            end_time_match = TEST_END_TIME_RE.search(doc)
+            if end_time_match:
+                completed_at = int(end_time_match.group(1)) / 1000.0
+
+            self.add_result_event(
+                events,
+                scene_name,
+                name_match.group(1),
+                self.status_value(result_match.group(1)),
+                completed_at,
+                source_group=0,
+            )
+        return sorted(events.values(), key=self.result_sort_key)
+
+    def parse_test_log_events(self, log_file: Path, scene_name: str) -> List[Dict[str, Any]]:
+        try:
+            text = log_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return []
+
+        completed_at = self.path_mtime(log_file)
+        events = {}
+        for match in TEST_LOG_RESULT_RE.finditer(text):
+            self.add_result_event(
+                events,
+                scene_name,
+                match.group(1),
+                self.status_value(match.group(2)),
+                completed_at,
+                source_group=0,
+            )
+        return sorted(events.values(), key=self.result_sort_key)
+
+    def discover_tc_result_events(self, its_dir: Path) -> List[Dict[str, Any]]:
+        events: Dict[tuple[str, str], Dict[str, Any]] = {}
+
+        for log_file in its_dir.rglob("test_log.INFO"):
+            scene_name = self.get_scene_name_from_path(log_file, its_dir)
+            if not scene_name:
+                continue
+            for event in self.parse_test_log_events(log_file, scene_name):
+                self.add_result_event(
+                    events,
+                    event["scene"],
+                    event["test"],
+                    event["status"],
+                    event["completedAt"],
+                    event["sourceGroup"],
+                )
+
+        for summary_file in its_dir.rglob("test_summary.yaml"):
+            scene_name = self.get_scene_name_from_path(summary_file, its_dir)
+            if not scene_name:
+                continue
+            for event in self.parse_test_summary_events(summary_file, scene_name):
+                self.add_result_event(
+                    events,
+                    event["scene"],
+                    event["test"],
+                    event["status"],
+                    event["completedAt"],
+                    event["sourceGroup"],
+                )
+
+        for scene_summary in its_dir.rglob("scene_test_summary.txt"):
+            scene_name = scene_summary.parent.name
+            completed_at = self.path_mtime(scene_summary)
+            try:
+                lines = scene_summary.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+
+            for line in lines:
+                match = STATUS_LINE_RE.match(line.strip())
+                parts = line.split()
+                if not match or len(parts) < 2:
+                    continue
+                self.add_result_event(
+                    events,
+                    scene_name,
+                    parts[1].replace(".py", ""),
+                    self.status_value(match.group(1)),
+                    completed_at,
+                    source_group=1,
+                )
+
+        return sorted(events.values(), key=self.result_sort_key)
+
+    def release_pending_results(self) -> None:
+        if not self.pending_results:
+            return
+
+        now = time.monotonic()
+        if self.replay_interval == 0:
+            while self.pending_results:
+                event = self.pending_results.pop(0)
+                self.visible_results.setdefault(event["scene"], {})[event["test"]] = event["status"]
+            self.last_replay_emit_at = now
+            return
+
+        if self.last_replay_emit_at is not None and now - self.last_replay_emit_at < self.replay_interval:
+            return
+
+        event = self.pending_results.pop(0)
+        self.visible_results.setdefault(event["scene"], {})[event["test"]] = event["status"]
+        self.last_replay_emit_at = now
+
+    def get_replayed_tc_results(self, its_dir: Path) -> Dict[str, Dict[str, int]]:
+        with self.replay_lock:
+            self.reset_replay(its_dir)
+            events = self.discover_tc_result_events(its_dir)
+            visible_keys = {
+                (scene_name, test_name)
+                for scene_name, scene_results in self.visible_results.items()
+                for test_name in scene_results
+            }
+            pending_keys = {
+                (event["scene"], event["test"])
+                for event in self.pending_results
+            }
+
+            for event in events:
+                event_key = (event["scene"], event["test"])
+                if event_key in visible_keys:
+                    continue
+                if event_key in pending_keys:
+                    continue
+                self.pending_results.append(event)
+                pending_keys.add(event_key)
+
+            self.pending_results.sort(key=self.result_sort_key)
+            self.release_pending_results()
+            return self.copy_visible_results()
+
+    def parse_tc_results(self, its_dir: Path) -> Dict[str, Dict[str, int]]:
+        return self.get_replayed_tc_results(its_dir)
+
+    def get_updated_structure(self, file_results: Dict[str, Dict[str, int]] | None = None) -> List[Dict]:
+        if file_results is None:
+            latest_dir = self.get_latest_dir()
+            file_results = self.parse_tc_results(latest_dir) if latest_dir else {}
         
         updated_list = []
         for item in MASTER_STRUCTURE:
             scene_name = item["scene"]
             new_tests = {}
             for test_key in item["tests"]:
-                if scene_name in allowed_scenes:
-                    new_tests[test_key] = file_results.get(scene_name, {}).get(test_key, 0)
-                else:
-                    new_tests[test_key] = 0
+                new_tests[test_key] = file_results.get(scene_name, {}).get(test_key, 0)
             updated_list.append({"scene": scene_name, "tests": new_tests})
         return updated_list
 
     # [이식] adapter에서 검증된 통계 점수화 산출 로직
-    def generate_analysis_data(self) -> Dict[str, Any]:
-        latest_dir = self.get_latest_dir()
-        allowed_scenes = self.get_allowed_scenes()
+    def generate_analysis_data(self, file_results: Dict[str, Dict[str, int]] | None = None) -> Dict[str, Any]:
+        if file_results is None:
+            latest_dir = self.get_latest_dir()
+            file_results = self.parse_tc_results(latest_dir) if latest_dir else {}
         
         pass_count = 0
         fail_count = 0
@@ -166,31 +406,22 @@ class ITSMonitor:
         metric_cycle = ("colorAccuracy", "resolution", "dynamicRange", "defectDetect")
         metric_index = 0
 
-        if latest_dir:
-            summary_files = sorted(latest_dir.rglob("scene_test_summary.txt"))
-            for summary_file in summary_files:
-                scene_name = summary_file.parent.name
-                # 가상 타임라인에 도달하지 않은 요약 파일은 파싱에서 제외합니다.
-                if scene_name not in allowed_scenes:
+        for item in MASTER_STRUCTURE:
+            scene_results = file_results.get(item["scene"], {})
+            for test_key in item["tests"]:
+                status_value = scene_results.get(test_key, 0)
+                if status_value == 0:
                     continue
-                try:
-                    lines = summary_file.read_text(encoding="utf-8", errors="ignore").splitlines()
-                    for line in lines:
-                        match = STATUS_LINE_RE.match(line.strip())
-                        if not match:
-                            continue
-                        status = match.group(1).upper()
-                        metric_name = metric_cycle[metric_index % len(metric_cycle)]
-                        metric_index += 1
-                        
-                        if status == "PASS":
-                            pass_count += 1
-                            tests_by_metric[metric_name]["pass"] += 1
-                        elif status == "FAIL":
-                            fail_count += 1
-                            tests_by_metric[metric_name]["fail"] += 1
-                except:
-                    continue
+
+                metric_name = metric_cycle[metric_index % len(metric_cycle)]
+                metric_index += 1
+
+                if status_value == self.status_map["PASS"]:
+                    pass_count += 1
+                    tests_by_metric[metric_name]["pass"] += 1
+                elif status_value == self.status_map["FAIL"]:
+                    fail_count += 1
+                    tests_by_metric[metric_name]["fail"] += 1
 
         total = pass_count + fail_count
         overall = max(0.0, min(100.0, (pass_count / total) * 100.0)) if total > 0 else 0.0
@@ -230,10 +461,12 @@ class ItsHandler(BaseHTTPRequestHandler):
         request_path = urlparse(self.path).path
         
         if request_path == "/its-status.json":
+            latest_dir = self.monitor.get_latest_dir()
+            file_results = self.monitor.parse_tc_results(latest_dir) if latest_dir else {}
             # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
             response_data = {
-                "tree": self.monitor.get_updated_structure(),
-                "analysis": self.monitor.generate_analysis_data(),
+                "tree": self.monitor.get_updated_structure(file_results),
+                "analysis": self.monitor.generate_analysis_data(file_results),
                 "capture": self.monitor.get_capture_info()
             }
             payload = json.dumps(response_data).encode("utf-8")
@@ -323,9 +556,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="/tmp", type=Path)
     parser.add_argument("--port", default=8765, type=int)
+    parser.add_argument("--replay-interval", default=1.0, type=float)
     args = parser.parse_args()
 
-    ItsHandler.monitor = ITSMonitor(args.results_dir)
+    ItsHandler.monitor = ITSMonitor(args.results_dir, args.replay_interval)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), ItsHandler)
     print(f"================================================")
     print(f"   ITS Integrated Monitor Started")
