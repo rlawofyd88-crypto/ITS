@@ -742,6 +742,35 @@ input[type="range"] {
     display: block;
 }
 
+.capture-tabs-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.capture-panels {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+.capture-panel {
+    display: none;
+    height: 100%;
+    min-height: 0;
+}
+
+.capture-panel.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.capture-panel .device-frame {
+    flex: 1;
+    min-height: 0;
+}
+
 .tc-item {
     cursor: pointer;
     user-select: none;

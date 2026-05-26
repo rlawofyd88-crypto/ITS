@@ -130,26 +130,60 @@
             <span class="signal-badge" id="liveBadge">LIVE</span>
           </div>
 
-          <div class="device-frame">
-            <div class="scanline"></div>
-            <div class="camera-scene" id="cameraScene" aria-label="simulated live camera feed">
-              <img id="dutMirror" class="dut-mirror" src="./data/live-dut-feed.png" alt="Latest CameraITS capture" />
-              <div class="target-card target-main">
-                <span class="android-mark">ANDROID</span>
-                <span class="lens lens-a"></span>
-                <span class="lens lens-b"></span>
-                <span class="lens lens-c"></span>
+          <div class="capture-tabs-container">
+              <div id="captureTabs" class="log-tabs">
+                  <button
+                      class="camera-tab capture-tab active"
+                      data-capture-tab-id="live"
+                  >
+                      LIVE
+                  </button>
               </div>
-              <div class="focus-box focus-primary"></div>
-              <div class="focus-box focus-secondary"></div>
-              <div class="exposure-ruler">
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
+
+              <div class="capture-panels">
+                  <div
+                      class="capture-panel active"
+                      data-capture-tab-id="live"
+                  >
+                      <div class="device-frame">
+                          <div class="scanline"></div>
+
+                          <div
+                              class="camera-scene"
+                              id="cameraScene"
+                              aria-label="simulated live camera feed"
+                          >
+                              <img
+                                  id="dutMirror"
+                                  class="dut-mirror"
+                                  src="./data/live-dut-feed.png"
+                                  alt="Latest CameraITS capture"
+                              />
+
+                              <div class="target-card target-main">
+                                  <span class="android-mark">
+                                      ANDROID
+                                  </span>
+
+                                  <span class="lens lens-a"></span>
+                                  <span class="lens lens-b"></span>
+                                  <span class="lens lens-c"></span>
+                              </div>
+
+                              <div class="focus-box focus-primary"></div>
+                              <div class="focus-box focus-secondary"></div>
+
+                              <div class="exposure-ruler">
+                                  <span></span>
+                                  <span></span>
+                                  <span></span>
+                                  <span></span>
+                                  <span></span>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
               </div>
-            </div>
           </div>
 
         </article>

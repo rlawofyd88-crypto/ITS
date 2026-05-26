@@ -27,6 +27,10 @@ const tcListContainer = document.querySelector("#tcList");
 const logTabsContainer = document.querySelector("#logTabs");
 const logPanelsContainer = document.querySelector("#logPanels");
 
+const captureTabsContainer = document.querySelector("#captureTabs");
+
+const capturePanelsContainer = document.querySelector(".capture-panels");
+
 let tcLogTabs = [];
 
 const MAX_TC_LOG_TABS = 5;
@@ -723,7 +727,34 @@ function activateLogTab(tabId) {
     }
 }
 
-function createTcLogTab(tabId, title, logs) {
+function activateCaptureTab(tabId) {
+    document
+        .querySelectorAll(".capture-panel")
+        .forEach((panel) => {
+            panel.classList.toggle(
+                "active",
+                panel.dataset.captureTabId === tabId
+            );
+        });
+
+    document
+        .querySelectorAll(".capture-tab")
+        .forEach((tab) => {
+            tab.classList.toggle(
+                "active",
+                tab.dataset.captureTabId === tabId
+            );
+        });
+}
+
+function createTcLogTab(
+    tabId,
+    title,
+    logs,
+    cameraId,
+    sceneName,
+    testName
+) {
     const existingTab = tcLogTabs.find(
         (tab) => tab.id === tabId
     );
@@ -755,6 +786,12 @@ function createTcLogTab(tabId, title, logs) {
 
     tabButton.addEventListener("click", () => {
         activateLogTab(tabId);
+
+        showTcCaptureTab(
+            cameraId,
+            sceneName,
+            testName
+        );
     });
 
     logTabsContainer.appendChild(tabButton);
@@ -801,7 +838,10 @@ function createTcLogTab(tabId, title, logs) {
     logPanelsContainer.appendChild(panel);
 
     tcLogTabs.push({
-        id: tabId
+        id: tabId,
+        cameraId,
+        sceneName,
+        testName
     });
 
     activateLogTab(tabId);
@@ -827,12 +867,216 @@ async function openTcLogTab(cameraId, sceneName, testName) {
         createTcLogTab(
             `${cameraId}:${sceneName}:${testName}`,
             formatTcName(testName),
-            data.logs || []
+            data.logs || [],
+            cameraId,
+            sceneName,
+            testName
+        );
+
+        showTcCaptureTab(
+            cameraId,
+            sceneName,
+            testName
         );
     } catch (error) {
         console.error(error);
     }
 }
+
+async function showTcCaptureTab(
+    cameraId,
+    sceneName,
+    testName
+) {
+    const tabId = "tc-capture";
+
+    // 기존 TC Capture 제거
+    document
+        .querySelector(
+            '.capture-tab[data-capture-tab-id="tc-capture"]'
+        )
+        ?.remove();
+
+    document
+        .querySelector(
+            '.capture-panel[data-capture-tab-id="tc-capture"]'
+        )
+        ?.remove();
+
+    // 새 탭 생성
+    const tabButton =
+        document.createElement("button");
+
+    tabButton.className =
+        "camera-tab capture-tab";
+
+    tabButton.dataset.captureTabId =
+        tabId;
+
+    tabButton.textContent =
+        formatTcName(testName);
+
+    tabButton.addEventListener(
+        "click",
+        () => {
+            activateCaptureTab(tabId);
+        }
+    );
+
+    captureTabsContainer.appendChild(
+        tabButton
+    );
+
+    // 패널 생성
+    const panel =
+        document.createElement("div");
+
+    panel.className =
+        "capture-panel";
+
+    panel.dataset.captureTabId =
+        tabId;
+
+    const response = await fetch(
+        `${monitorEndpoint}/get-tc-capture`
+        + `?camera=${encodeURIComponent(cameraId)}`
+        + `&scene=${encodeURIComponent(sceneName)}`
+        + `&test=${encodeURIComponent(testName)}`,
+        {
+            cache: "no-store"
+        }
+    );
+
+    if (response.ok) {
+        const blob = await response.blob();
+
+        if (blob.size) {
+            const imageUrl =
+                URL.createObjectURL(blob);
+
+            panel.innerHTML = `
+                <div class="device-frame">
+                    <div class="scanline"></div>
+
+                    <div class="camera-scene has-live-feed">
+                        <img
+                            class="dut-mirror"
+                            src="${imageUrl}"
+                            alt="${formatTcName(testName)}"
+                        />
+
+                        <div class="target-card target-main">
+                            <span class="android-mark">
+                                ANDROID
+                            </span>
+
+                            <span class="lens lens-a"></span>
+                            <span class="lens lens-b"></span>
+                            <span class="lens lens-c"></span>
+                        </div>
+
+                        <div class="focus-box focus-primary"></div>
+
+                        <div class="focus-box focus-secondary"></div>
+
+                        <div class="exposure-ruler">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            panel.innerHTML = `
+                <div class="device-frame">
+                    <div class="scanline"></div>
+
+                    <div
+                        class="camera-scene has-live-feed"
+                        aria-label="simulated live camera feed"
+                    >
+                        <img
+                            class="dut-mirror"
+                            src="./data/live-dut-feed.png"
+                            alt="No Capture Image"
+                        />
+
+                        <div class="target-card target-main">
+                            <span class="android-mark">
+                                ANDROID
+                            </span>
+
+                            <span class="lens lens-a"></span>
+                            <span class="lens lens-b"></span>
+                            <span class="lens lens-c"></span>
+                        </div>
+
+                        <div class="focus-box focus-primary"></div>
+
+                        <div class="focus-box focus-secondary"></div>
+
+                        <div class="exposure-ruler">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    } else {
+        panel.innerHTML = `
+            <div class="device-frame">
+                <div class="scanline"></div>
+
+                <div
+                    class="camera-scene has-live-feed"
+                    aria-label="simulated live camera feed"
+                >
+                    <img
+                        class="dut-mirror"
+                        src="./data/live-dut-feed.png"
+                        alt="No Capture Image"
+                    />
+
+                    <div class="target-card target-main">
+                        <span class="android-mark">
+                            ANDROID
+                        </span>
+
+                        <span class="lens lens-a"></span>
+                        <span class="lens lens-b"></span>
+                        <span class="lens lens-c"></span>
+                    </div>
+
+                    <div class="focus-box focus-primary"></div>
+
+                    <div class="focus-box focus-secondary"></div>
+
+                    <div class="exposure-ruler">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    capturePanelsContainer.appendChild(
+        panel
+    );
+
+    activateCaptureTab(tabId);
+}
+
 // 페이지 로드 시 실행
 //document.addEventListener("DOMContentLoaded", renderTcTree);
 
@@ -1092,6 +1336,20 @@ function init() {
       liveTabButton.addEventListener("click", () => {
           activateLogTab("live");
       });
+  }
+
+  const liveCaptureTab =
+      document.querySelector(
+          '.capture-tab[data-capture-tab-id="live"]'
+      );
+
+  if (liveCaptureTab) {
+      liveCaptureTab.addEventListener(
+          "click",
+          () => {
+              activateCaptureTab("live");
+          }
+      );
   }
 }
 

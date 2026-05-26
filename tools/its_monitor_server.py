@@ -685,7 +685,6 @@ class ITSMonitor:
             }
         }
 
-
 class ItsHandler(BaseHTTPRequestHandler):
     monitor: ITSMonitor
     def log_message(self, *args): pass
@@ -693,7 +692,7 @@ class ItsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_url = urlparse(self.path)
         request_path = parsed_url.path
-        
+
         if request_path == "/its-status.json":
             latest_dir = self.monitor.get_latest_dir()
             file_results = self.monitor.parse_tc_results(latest_dir) if latest_dir else {}
@@ -737,7 +736,7 @@ class ItsHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(payload)
-            
+
         elif request_path == "/latest-capture-image":
             query = parse_qs(parsed_url.query)
             camera_id = query.get("camera", [""])[0] or None
@@ -769,13 +768,11 @@ class ItsHandler(BaseHTTPRequestHandler):
         elif request_path == "/get-tc-log":
             try:
                 query = parse_qs(parsed_url.query)
-        
                 camera_id = query.get("camera", [""])[0]
                 scene_name = query.get("scene", [""])[0]
                 test_name = query.get("test", [""])[0]
-        
                 matched_event = None
-        
+
                 for event in reversed(self.monitor.published_events):
                     if (
                         event.get("cameraId") == camera_id
@@ -784,18 +781,16 @@ class ItsHandler(BaseHTTPRequestHandler):
                     ):
                         matched_event = event
                         break
-                    
+
                 logs = []
-        
+
                 if matched_event:
                     logs = self.monitor.read_event_log_lines(
                         matched_event
                     )
-        
                 payload = json.dumps({
                     "logs": logs
                 }).encode("utf-8")
-        
                 self.send_response(200)
                 self.send_header(
                     "Content-Type",
@@ -806,16 +801,86 @@ class ItsHandler(BaseHTTPRequestHandler):
                     "*"
                 )
                 self.end_headers()
-        
                 self.wfile.write(payload)
-        
+
             except Exception as e:
                 print(f"TC Log Error: {e}")
-        
                 self.send_response(200)
                 self.end_headers()
-        
                 self.wfile.write(b'{"logs":[]}')
+        elif request_path == "/get-tc-capture":
+            try:
+                query = parse_qs(parsed_url.query)
+
+                camera_id = query.get("camera", [""])[0]
+                scene_name = query.get("scene", [""])[0]
+                test_name = query.get("test", [""])[0]
+
+                matched_event = None
+
+                for event in reversed(
+                    self.monitor.published_events
+                ):
+                    if (
+                        event.get("cameraId") == camera_id
+                        and event.get("scene") == scene_name
+                        and event.get("test") == test_name
+                    ):
+                        matched_event = event
+                        break
+
+                if not matched_event:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                image_path = self.monitor.get_event_image(
+                    matched_event
+                )
+
+                if not image_path:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                payload = image_path.read_bytes()
+
+                content_type = (
+                    mimetypes.guess_type(image_path.name)[0]
+                    or "application/octet-stream"
+                )
+
+                self.send_response(200)
+
+                self.send_header(
+                    "Content-Type",
+                    content_type
+                )
+
+                self.send_header(
+                    "Content-Length",
+                    str(len(payload))
+                )
+
+                self.send_header(
+                    "Access-Control-Allow-Origin",
+                    "*"
+                )
+
+                self.send_header(
+                    "Cache-Control",
+                    "no-store"
+                )
+
+                self.end_headers()
+
+                self.wfile.write(payload)
+
+            except Exception as e:
+                print(f"TC Capture Error: {e}")
+
+                self.send_response(404)
+                self.end_headers()
         elif request_path == "/get-live-logs":
             try:
                 query = parse_qs(parsed_url.query)
