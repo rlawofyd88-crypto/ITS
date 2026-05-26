@@ -33,6 +33,8 @@ const capturePanelsContainer = document.querySelector(".capture-panels");
 
 let tcLogTabs = [];
 
+let currentCaptureTabKey = "";
+
 const MAX_TC_LOG_TABS = 5;
 
 /**
@@ -576,6 +578,15 @@ async function pollItsData() {
 }
 
 async function refreshLiveFeed() {
+  const livePanel = document.querySelector(
+    '.capture-panel[data-capture-tab-id="live"]'
+  );
+
+  // LIVE Capture Tab 이 활성 상태가 아니면 polling 중단
+  if (!livePanel?.classList.contains("active")) {
+    return;
+  }
+
   try {
     const feedParams = new URLSearchParams({ t: String(Date.now()) });
     if (!hasCustomLiveFeed && selectedCameraId) {
@@ -619,21 +630,6 @@ async function refreshLiveFeed() {
     dutMirror.removeAttribute("src");
     dutMirror.classList.add("hidden");
     cameraScene.classList.remove("has-live-feed");
-  }
-}
-
-async function refreshLiveState() {
-  try {
-    const response = await fetch(`${liveStatePath}?t=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Live state returned ${response.status}`);
-    }
-    const state = await response.json();
-    liveCaption.textContent = state.label || "ITS milestone captured";
-    liveBadge.textContent = state.stage || "LIVE";
-  } catch (error) {
-    liveCaption.textContent = "Waiting for ITS milestone...";
-    liveBadge.textContent = "LIVE";
   }
 }
 
@@ -697,27 +693,46 @@ function renderTcTree() {
     tcListContainer.appendChild(groupLi);
   });
 }
+
 function activateLogTab(tabId) {
+    // 모든 panel 비활성화
     document.querySelectorAll(".log-panel").forEach((panel) => {
-        panel.classList.toggle(
-            "active",
-            panel.dataset.tabId === tabId
-        );
+        panel.classList.remove("active");
     });
 
+    // 모든 tab 비활성화
     document.querySelectorAll(".log-tab").forEach((tab) => {
-        tab.classList.toggle(
-            "active",
-            tab.dataset.tabId === tabId
-        );
+        tab.classList.remove("active");
     });
 
-    // LIVE 탭 복귀 시 Auto Follow 상태 복구
+    // 대상 panel 활성화
+    const targetPanel = document.querySelector(
+        `.log-panel[data-tab-id="${tabId}"]`
+    );
+
+    if (targetPanel) {
+        targetPanel.classList.add("active");
+    }
+
+    // 대상 tab 활성화
+    const targetTab = document.querySelector(
+        `.log-tab[data-tab-id="${tabId}"]`
+    );
+
+    if (targetTab) {
+        targetTab.classList.add("active");
+    }
+
+    // LIVE 탭 복귀 시 Auto Follow 복구
     if (tabId === "live") {
-        const liveViewer = document.getElementById("logViewer");
-
+        const liveViewer =
+            document.getElementById("logViewer");
+    
         logAutoFollow = true;
-
+    
+        // Capture 도 LIVE 로 동기화
+        activateCaptureTab("live");
+    
         if (liveViewer) {
             requestAnimationFrame(() => {
                 liveViewer.scrollTop =
@@ -728,23 +743,67 @@ function activateLogTab(tabId) {
 }
 
 function activateCaptureTab(tabId) {
+    // LIVE 복귀 시 TC capture 정리
+    if (tabId === "live") {
+        currentCaptureTabKey = "";
+
+        const oldPanel = document.querySelector(
+            '.capture-panel[data-capture-tab-id="tc-capture"]'
+        );
+
+        if (oldPanel?.dataset.objectUrl) {
+            URL.revokeObjectURL(
+                oldPanel.dataset.objectUrl
+            );
+        }
+
+        document
+            .querySelector(
+                '.capture-tab[data-capture-tab-id="tc-capture"]'
+            )
+            ?.remove();
+
+        oldPanel?.remove();
+    }
+
+    // 모든 panel 비활성화
     document
         .querySelectorAll(".capture-panel")
         .forEach((panel) => {
-            panel.classList.toggle(
-                "active",
-                panel.dataset.captureTabId === tabId
-            );
+            panel.classList.remove("active");
         });
 
+    // 모든 tab 비활성화
     document
         .querySelectorAll(".capture-tab")
         .forEach((tab) => {
-            tab.classList.toggle(
-                "active",
-                tab.dataset.captureTabId === tabId
-            );
+            tab.classList.remove("active");
         });
+
+    // 대상 panel 활성화
+    const targetPanel = document.querySelector(
+        `.capture-panel[data-capture-tab-id="${tabId}"]`
+    );
+
+    if (targetPanel) {
+        targetPanel.classList.add("active");
+    
+        // LIVE 탭 복귀 시 즉시 최신 Capture 반영
+        if (tabId === "live") {
+            requestAnimationFrame(() => {
+                refreshLiveFeed();
+            });
+        }
+    }
+
+    // 대상 tab 활성화
+    const targetTab = document.querySelector(
+        `.capture-tab[data-capture-tab-id="${tabId}"]`
+    );
+
+    if (targetTab) {
+        targetTab.classList.add("active");
+    }
 }
 
 function createTcLogTab(
@@ -761,6 +820,13 @@ function createTcLogTab(
 
     if (existingTab) {
         activateLogTab(tabId);
+    
+        showTcCaptureTab(
+            cameraId,
+            sceneName,
+            testName
+        );
+      
         return;
     }
 
@@ -883,6 +949,47 @@ async function openTcLogTab(cameraId, sceneName, testName) {
     }
 }
 
+function createEmptyCapturePanel() {
+    return `
+        <div class="device-frame">
+            <div class="scanline"></div>
+
+            <div
+                class="camera-scene has-live-feed"
+                aria-label="simulated live camera feed"
+            >
+                <img
+                    class="dut-mirror"
+                    src="./data/live-dut-feed.png"
+                    alt="No Capture Image"
+                />
+
+                <div class="target-card target-main">
+                    <span class="android-mark">
+                        ANDROID
+                    </span>
+
+                    <span class="lens lens-a"></span>
+                    <span class="lens lens-b"></span>
+                    <span class="lens lens-c"></span>
+                </div>
+
+                <div class="focus-box focus-primary"></div>
+
+                <div class="focus-box focus-secondary"></div>
+
+                <div class="exposure-ruler">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 async function showTcCaptureTab(
     cameraId,
     sceneName,
@@ -890,18 +997,36 @@ async function showTcCaptureTab(
 ) {
     const tabId = "tc-capture";
 
+    const captureKey =
+        `${cameraId}:${sceneName}:${testName}`;
+
+    // 동일 Capture 재선택이면 skip
+    if (currentCaptureTabKey === captureKey) {
+        activateCaptureTab(tabId);
+        return;
+    }
+
+    currentCaptureTabKey = captureKey;
+
+    const oldPanel = document.querySelector(
+        '.capture-panel[data-capture-tab-id="tc-capture"]'
+    );
+
+    // 기존 Object URL 정리
+    if (oldPanel?.dataset.objectUrl) {
+        URL.revokeObjectURL(
+            oldPanel.dataset.objectUrl
+        );
+    }
+
     // 기존 TC Capture 제거
     document
         .querySelector(
             '.capture-tab[data-capture-tab-id="tc-capture"]'
         )
         ?.remove();
-
-    document
-        .querySelector(
-            '.capture-panel[data-capture-tab-id="tc-capture"]'
-        )
-        ?.remove();
+      
+    oldPanel?.remove();
 
     // 새 탭 생성
     const tabButton =
@@ -951,8 +1076,8 @@ async function showTcCaptureTab(
         const blob = await response.blob();
 
         if (blob.size) {
-            const imageUrl =
-                URL.createObjectURL(blob);
+            const imageUrl = URL.createObjectURL(blob);
+                panel.dataset.objectUrl = imageUrl;
 
             panel.innerHTML = `
                 <div class="device-frame">
@@ -990,84 +1115,10 @@ async function showTcCaptureTab(
                 </div>
             `;
         } else {
-            panel.innerHTML = `
-                <div class="device-frame">
-                    <div class="scanline"></div>
-
-                    <div
-                        class="camera-scene has-live-feed"
-                        aria-label="simulated live camera feed"
-                    >
-                        <img
-                            class="dut-mirror"
-                            src="./data/live-dut-feed.png"
-                            alt="No Capture Image"
-                        />
-
-                        <div class="target-card target-main">
-                            <span class="android-mark">
-                                ANDROID
-                            </span>
-
-                            <span class="lens lens-a"></span>
-                            <span class="lens lens-b"></span>
-                            <span class="lens lens-c"></span>
-                        </div>
-
-                        <div class="focus-box focus-primary"></div>
-
-                        <div class="focus-box focus-secondary"></div>
-
-                        <div class="exposure-ruler">
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                        </div>
-                    </div>
-                </div>
-            `;
+            panel.innerHTML = createEmptyCapturePanel();
         }
     } else {
-        panel.innerHTML = `
-            <div class="device-frame">
-                <div class="scanline"></div>
-
-                <div
-                    class="camera-scene has-live-feed"
-                    aria-label="simulated live camera feed"
-                >
-                    <img
-                        class="dut-mirror"
-                        src="./data/live-dut-feed.png"
-                        alt="No Capture Image"
-                    />
-
-                    <div class="target-card target-main">
-                        <span class="android-mark">
-                            ANDROID
-                        </span>
-
-                        <span class="lens lens-a"></span>
-                        <span class="lens lens-b"></span>
-                        <span class="lens lens-c"></span>
-                    </div>
-
-                    <div class="focus-box focus-primary"></div>
-
-                    <div class="focus-box focus-secondary"></div>
-
-                    <div class="exposure-ruler">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </div>
-                </div>
-            </div>
-        `;
+        panel.innerHTML = createEmptyCapturePanel();
     }
 
     capturePanelsContainer.appendChild(
@@ -1168,7 +1219,7 @@ async function fetchLiveLogs() {
                 lastLogSequence = Math.max(lastLogSequence, log.sequence);
             }
           
-            if (log.type === "SCENE_CHANGE") {
+            if (log.type === "CAMERA_CHANGE") {
                 logQueue.push(log);
                 queuedCount += 1;
             } else {
@@ -1317,7 +1368,7 @@ function init() {
   setInterval(updateClock, 1000);
   setInterval(updateMetrics, 900);
 
-  updateStatus().then(fetchLiveLogs);
+  updateStatus();
 
   setInterval(updateStatus, TC_STATUS_POLL_MS);
   setInterval(fetchLiveLogs, LOG_POLL_MS);

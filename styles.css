@@ -463,14 +463,6 @@ h2 {
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 
-.compare-stage {
-  position: relative;
-  min-height: 0;
-  border: 1px solid rgba(246, 244, 239, 0.16);
-  overflow: hidden;
-  background: #050706;
-}
-
 .raw-image {
   position: absolute;
   inset: 0;
@@ -574,8 +566,7 @@ input[type="range"] {
     margin-top: 16px;
   }
 
-  .device-frame,
-  .compare-stage {
+  .device-frame {
     min-height: 420px;
   }
 }
@@ -640,27 +631,7 @@ input[type="range"] {
   text-transform: uppercase;
 }
 
-.tc-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-  transition: background 0.2s ease, box-shadow 0.2s ease;
 
-  white-space: nowrap;      /* 이름이 줄바꿈되지 않게 강제 */
-  gap: 30px;                /* 이름과 Wait 사이 최소 간격 */
-  padding-right: 15px;      /* Wait 박스 우측 여백 확보 */
-}
-
-.tc-item.tc-focused {
-  background: rgba(88, 166, 255, 0.14);
-}
-
-.tc-item.tc-focused .tc-name {
-  color: #fff;
-}
 
 .tc-name {
   font-weight: bold;        /* 볼드체 적용 */
@@ -772,13 +743,27 @@ input[type="range"] {
 }
 
 .tc-item {
-    cursor: pointer;
-    user-select: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 
-    transition:
-        background 0.16s ease,
-        border-color 0.16s ease,
-        transform 0.16s ease;
+  white-space: nowrap;      /* 이름이 줄바꿈되지 않게 강제 */
+  gap: 30px;                /* 이름과 Wait 사이 최소 간격 */
+  padding-right: 15px;      /* Wait 박스 우측 여백 확보 */
+}
+
+.tc-item.tc-focused {
+  background: rgba(88, 166, 255, 0.14);
+}
+
+.tc-item.tc-focused .tc-name {
+  color: #fff;
 }
 
 .tc-item:hover {

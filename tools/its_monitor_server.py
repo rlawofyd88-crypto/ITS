@@ -490,13 +490,6 @@ class ITSMonitor:
             if since_sequence > self.replay_sequence:
                 since_sequence = 0
 
-            previous_key = ("", "")
-            for event in self.published_events:
-                if event.get("sequence", 0) <= since_sequence:
-                    previous_key = (event.get("cameraId", DEFAULT_CAMERA_ID), event["scene"])
-                else:
-                    break
-
             released_events = [
                 dict(event)
                 for event in self.published_events
