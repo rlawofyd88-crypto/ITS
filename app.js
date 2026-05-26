@@ -499,7 +499,7 @@ function applyCurrentTcFocus({ scroll = false, behavior = "smooth" } = {}) {
     }
   });
 
-  if (!scroll || !focusedItem) {
+  if (!scroll || !focusedItem || !tcAutoFollow) {
     return;
   }
 
@@ -725,11 +725,15 @@ async function updateStatus() {
 }
 
 let logQueue = [];
-let renderedLogs = new Set(); // 이미 화면에 표시된 로그 저장 (중복 방지)
+let renderedLogs = new Set();
 let isPausing = false;
 let lastLogSequence = 0;
+
 let logAutoFollow = true;
 let logAutoFollowRestoreTimer = null;
+
+let tcAutoFollow = true;
+let tcAutoFollowRestoreTimer = null;
 
 function clearLogViewer() {
     const logViewer = document.getElementById("logViewer");
@@ -844,6 +848,36 @@ function init() {
   updateMetrics();
   startLogSimulation();
 
+  const tcTreeContainer = document.getElementById("tcTreeContainer");
+  
+  if (tcTreeContainer) {
+    tcTreeContainer.addEventListener("scroll", () => {
+      const distanceFromBottom =
+      tcTreeContainer.scrollHeight
+      - tcTreeContainer.scrollTop
+      - tcTreeContainer.clientHeight;
+      
+      const isNearBottom = distanceFromBottom < 32;
+
+      // 사용자가 수동 탐색 중
+      if (!isNearBottom) {
+        tcAutoFollow = false;
+
+        if (tcAutoFollowRestoreTimer) {
+          clearTimeout(tcAutoFollowRestoreTimer);
+        }
+        
+        tcAutoFollowRestoreTimer = setTimeout(() => {
+          tcAutoFollow = true;
+        }, 5000);
+        
+        return;
+      }
+      
+      tcAutoFollow = true;
+    });
+  }
+
   const logViewer = document.getElementById("logViewer");
 
   if (logViewer) {
@@ -852,28 +886,28 @@ function init() {
         logViewer.scrollHeight
         - logViewer.scrollTop
         - logViewer.clientHeight;
-    
+
       const isNearBottom = distanceFromBottom < 32;
-    
+
       // 사용자가 위로 스크롤하면 Auto Follow 중단
       if (!isNearBottom) {
         logAutoFollow = false;
-      
+
         // 기존 복구 타이머 제거
         if (logAutoFollowRestoreTimer) {
           clearTimeout(logAutoFollowRestoreTimer);
         }
-      
+
         // 5초간 추가 입력 없으면 자동 복구
         logAutoFollowRestoreTimer = setTimeout(() => {
           logAutoFollow = true;
-        
+
           logViewer.scrollTop = logViewer.scrollHeight;
         }, 5000);
-      
+
         return;
       }
-    
+
       // 하단 근처 도달 시 즉시 재활성화
       logAutoFollow = true;
     });
