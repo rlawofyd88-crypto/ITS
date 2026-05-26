@@ -760,14 +760,14 @@ async function fetchLiveLogs() {
             if (Number.isFinite(log.sequence)) {
                 lastLogSequence = Math.max(lastLogSequence, log.sequence);
             }
-
+          
             if (log.type === "SCENE_CHANGE") {
-                logQueue.push(log); // 플래그는 무조건 큐에 삽입
+                logQueue.push(log);
                 queuedCount += 1;
             } else {
-                const logKey = log.id || log.text;
-                // 일반 로그만 중복 체크
-                if (!renderedLogs.has(logKey) || log.text.includes("Test results:")) {
+                const logKey = `${log.sequence}:${log.text}`;
+            
+                if (!renderedLogs.has(logKey)) {
                     logQueue.push(log);
                     renderedLogs.add(logKey);
                     queuedCount += 1;
