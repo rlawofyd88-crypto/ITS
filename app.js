@@ -728,6 +728,8 @@ let logQueue = [];
 let renderedLogs = new Set(); // 이미 화면에 표시된 로그 저장 (중복 방지)
 let isPausing = false;
 let lastLogSequence = 0;
+let logAutoFollow = true;
+let logAutoFollowRestoreTimer = null;
 
 function clearLogViewer() {
     const logViewer = document.getElementById("logViewer");
@@ -819,7 +821,10 @@ function startLogSimulation() {
         }
         logLine.innerHTML = text;
         logViewer.appendChild(logLine);
-        logViewer.scrollTop = logViewer.scrollHeight;
+
+        if (logAutoFollow) {
+            logViewer.scrollTop = logViewer.scrollHeight;
+        }
 
         if (rawText.includes("Test results:")) {
             isPausing = true;
@@ -833,21 +838,58 @@ function startLogSimulation() {
     }, LOG_RENDER_INTERVAL_MS);
 }
 
-// 2. 기존 초기화 로직 및 인터벌 유지
 function init() {
   updateClock();
-  renderTcTree(); // TC 리스트업 실행
+  renderTcTree();
   updateMetrics();
   startLogSimulation();
+
+  const logViewer = document.getElementById("logViewer");
+
+  if (logViewer) {
+    logViewer.addEventListener("scroll", () => {
+      const distanceFromBottom =
+        logViewer.scrollHeight
+        - logViewer.scrollTop
+        - logViewer.clientHeight;
+    
+      const isNearBottom = distanceFromBottom < 32;
+    
+      // 사용자가 위로 스크롤하면 Auto Follow 중단
+      if (!isNearBottom) {
+        logAutoFollow = false;
+      
+        // 기존 복구 타이머 제거
+        if (logAutoFollowRestoreTimer) {
+          clearTimeout(logAutoFollowRestoreTimer);
+        }
+      
+        // 5초간 추가 입력 없으면 자동 복구
+        logAutoFollowRestoreTimer = setTimeout(() => {
+          logAutoFollow = true;
+        
+          logViewer.scrollTop = logViewer.scrollHeight;
+        }, 5000);
+      
+        return;
+      }
+    
+      // 하단 근처 도달 시 즉시 재활성화
+      logAutoFollow = true;
+    });
+  }
+
   setInterval(updateClock, 1000);
   setInterval(updateMetrics, 900);
+
   updateStatus().then(fetchLiveLogs);
+
   setInterval(updateStatus, TC_STATUS_POLL_MS);
   setInterval(fetchLiveLogs, LOG_POLL_MS);
+
   refreshLiveFeed();
   setInterval(refreshLiveFeed, TC_STATUS_POLL_MS);
-  
-  // 데이터 폴링 시작 (엔드포인트가 있을 경우)
+
   if (typeof pollItsData === "function") {
     setInterval(pollItsData, 1500);
   }
