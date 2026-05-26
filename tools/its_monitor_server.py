@@ -135,6 +135,7 @@ class ITSMonitor:
         self.last_replay_emit_at = None
         self.replay_sequence = 0
         self.log_scene_name = ""
+        self.last_log_camera_id = ""
 
     def copy_visible_results(self) -> Dict[str, Dict[str, Dict[str, int]]]:
         return {
@@ -503,38 +504,57 @@ class ITSMonitor:
             ]
 
             log_items = []
+
             for event in released_events:
-                current_key = (event.get("cameraId", DEFAULT_CAMERA_ID), event["scene"])
-                if previous_key != ("", "") and previous_key != current_key:
+                current_camera_id = event.get("cameraId", DEFAULT_CAMERA_ID)
+
+                if (
+                    self.last_log_camera_id
+                    and self.last_log_camera_id != current_camera_id
+                ):
                     log_items.append({
-                        "type": "SCENE_CHANGE",
-                        "id": f"scene:{event.get('sequence', 0)}:{current_key[0]}:{current_key[1]}",
+                        "type": "CAMERA_CHANGE",
+                        "id": f"camera:{event.get('sequence', 0)}:{current_camera_id}",
                         "sequence": event.get("sequence", 0),
-                        "cameraId": current_key[0],
-                        "scene": current_key[1],
-                        "text": f"--- {current_key[0]} / SCENE_CHANGED_{current_key[1]} ---",
+                        "cameraId": current_camera_id,
+                        "scene": event["scene"],
+                        "text": f"--- CAMERA_CHANGED_{current_camera_id} ---",
                     })
-                previous_key = current_key
-                log_items.append({"type": "TC_LOG", "event": event})
 
-        log_data = []
-        for item in log_items:
-            if item.get("type") == "SCENE_CHANGE":
-                log_data.append(item)
-                continue
+                self.last_log_camera_id = current_camera_id
 
-            event = item["event"]
-            event_prefix = f"{event.get('sequence', 0)}:{event.get('cameraId', DEFAULT_CAMERA_ID)}:{event['scene']}:{event['test']}"
-            for line_index, line in enumerate(self.read_event_log_lines(event)):
-                log_data.append({
-                    "id": f"{event_prefix}:{line_index}",
-                    "sequence": event.get("sequence", 0),
-                    "cameraId": event.get("cameraId", DEFAULT_CAMERA_ID),
-                    "scene": event["scene"],
-                    "test": event["test"],
-                    "text": line,
+                log_items.append({
+                    "type": "TC_LOG",
+                    "event": event
                 })
-        return log_data
+
+            log_data = []
+
+            for item in log_items:
+                if item.get("type") == "CAMERA_CHANGE":
+                    log_data.append(item)
+                    continue
+
+                event = item["event"]
+
+                event_prefix = (
+                    f"{event.get('sequence', 0)}:"
+                    f"{event.get('cameraId', DEFAULT_CAMERA_ID)}:"
+                    f"{event['scene']}:"
+                    f"{event['test']}"
+                )
+
+                for line_index, line in enumerate(self.read_event_log_lines(event)):
+                    log_data.append({
+                        "id": f"{event_prefix}:{line_index}",
+                        "sequence": event.get("sequence", 0),
+                        "cameraId": event.get("cameraId", DEFAULT_CAMERA_ID),
+                        "scene": event["scene"],
+                        "test": event["test"],
+                        "text": line,
+                    })
+
+            return log_data
 
     def release_pending_results(self) -> None:
         if not self.pending_results:

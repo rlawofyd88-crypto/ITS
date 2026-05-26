@@ -790,8 +790,7 @@ function startLogSimulation() {
         const log = logQueue.shift();
 
         // 1. Scene 변경 플래그를 만났을 때
-        if (log.type === "SCENE_CHANGE") {
-            // 바로 비우지 않고, "다음에 로그가 들어오면 비워라"라고 예약만 합니다.
+        if (log.type === "CAMERA_CHANGE") {
             needsClear = true;
             return;
         }
