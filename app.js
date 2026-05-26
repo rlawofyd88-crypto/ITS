@@ -24,6 +24,13 @@ const cameraTabs = document.querySelector("#cameraTabs");
 
 const tcListContainer = document.querySelector("#tcList");
 
+const logTabsContainer = document.querySelector("#logTabs");
+const logPanelsContainer = document.querySelector("#logPanels");
+
+let tcLogTabs = [];
+
+const MAX_TC_LOG_TABS = 5;
+
 /**
  * 스네이크 케이스(test_example_name)를 파스칼 케이스(ExampleName)로 변환합니다.
  * @param {string} name 
@@ -668,6 +675,17 @@ function renderTcTree() {
         <span class="tc-name">${formattedName}</span>
         <span class="tc-status ${currentStatus.className}">${currentStatus.text}</span>
       `;
+      if (statusValue !== 0) {
+          tcLi.classList.add("clickable");
+
+          tcLi.addEventListener("click", () => {
+              openTcLogTab(
+                  selectedCameraId,
+                  item.scene,
+                  rawName
+              );
+          });
+      }
       childUl.appendChild(tcLi);
     });
 
@@ -675,7 +693,146 @@ function renderTcTree() {
     tcListContainer.appendChild(groupLi);
   });
 }
+function activateLogTab(tabId) {
+    document.querySelectorAll(".log-panel").forEach((panel) => {
+        panel.classList.toggle(
+            "active",
+            panel.dataset.tabId === tabId
+        );
+    });
 
+    document.querySelectorAll(".log-tab").forEach((tab) => {
+        tab.classList.toggle(
+            "active",
+            tab.dataset.tabId === tabId
+        );
+    });
+
+    // LIVE 탭 복귀 시 Auto Follow 상태 복구
+    if (tabId === "live") {
+        const liveViewer = document.getElementById("logViewer");
+
+        logAutoFollow = true;
+
+        if (liveViewer) {
+            requestAnimationFrame(() => {
+                liveViewer.scrollTop =
+                    liveViewer.scrollHeight;
+            });
+        }
+    }
+}
+
+function createTcLogTab(tabId, title, logs) {
+    const existingTab = tcLogTabs.find(
+        (tab) => tab.id === tabId
+    );
+
+    if (existingTab) {
+        activateLogTab(tabId);
+        return;
+    }
+
+    // 최대 탭 제한
+    if (tcLogTabs.length >= MAX_TC_LOG_TABS) {
+        const oldest = tcLogTabs.shift();
+
+        document
+            .querySelector(`.log-tab[data-tab-id="${oldest.id}"]`)
+            ?.remove();
+
+        document
+            .querySelector(`.log-panel[data-tab-id="${oldest.id}"]`)
+            ?.remove();
+    }
+
+    // 탭 버튼 생성
+    const tabButton = document.createElement("button");
+
+    tabButton.className = "camera-tab log-tab";
+    tabButton.dataset.tabId = tabId;
+    tabButton.textContent = title;
+
+    tabButton.addEventListener("click", () => {
+        activateLogTab(tabId);
+    });
+
+    logTabsContainer.appendChild(tabButton);
+
+    // 패널 생성
+    const panel = document.createElement("div");
+
+    panel.className = "log-viewer log-panel";
+    panel.dataset.tabId = tabId;
+
+    logs.forEach((line) => {
+        const logLine = document.createElement("div");
+
+        logLine.className = "log-line-raw";
+
+        let formattedText = line;
+
+        if (formattedText.includes("==========>")) {
+            formattedText =
+                `<b style="color: #ffca28; font-size: 1.1em;">`
+                + `${formattedText}`
+                + `</b>`;
+        } else {
+            formattedText = formattedText
+                .replace(
+                    "INFO",
+                    '<span class="log-info-tag">INFO</span>'
+                )
+                .replace(
+                    "PASS",
+                    '<span class="log-pass-tag">PASS</span>'
+                )
+                .replace(
+                    "FAIL",
+                    '<span class="log-fail-tag">FAIL</span>'
+                );
+        }
+
+        logLine.innerHTML = formattedText;
+
+        panel.appendChild(logLine);
+    });
+
+    logPanelsContainer.appendChild(panel);
+
+    tcLogTabs.push({
+        id: tabId
+    });
+
+    activateLogTab(tabId);
+}
+async function openTcLogTab(cameraId, sceneName, testName) {
+    try {
+        const response = await fetch(
+            `${monitorEndpoint}/get-tc-log`
+            + `?camera=${encodeURIComponent(cameraId)}`
+            + `&scene=${encodeURIComponent(sceneName)}`
+            + `&test=${encodeURIComponent(testName)}`,
+            {
+                cache: "no-store"
+            }
+        );
+
+        if (!response.ok) {
+            return;
+        }
+
+        const data = await response.json();
+
+        createTcLogTab(
+            `${cameraId}:${sceneName}:${testName}`,
+            formatTcName(testName),
+            data.logs || []
+        );
+    } catch (error) {
+        console.error(error);
+    }
+}
 // 페이지 로드 시 실행
 //document.addEventListener("DOMContentLoaded", renderTcTree);
 
@@ -926,6 +1083,15 @@ function init() {
 
   if (typeof pollItsData === "function") {
     setInterval(pollItsData, 1500);
+  }
+  const liveTabButton = document.querySelector(
+      '.log-tab[data-tab-id="live"]'
+  );
+
+  if (liveTabButton) {
+      liveTabButton.addEventListener("click", () => {
+          activateLogTab("live");
+      });
   }
 }
 

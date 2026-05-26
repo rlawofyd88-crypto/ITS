@@ -44,8 +44,25 @@
             </div>
 
             <div class="split-right" id="customRightPanel">
-              <div id="logViewer" class="log-viewer">
-                <div class="log-line info">ITS Test Ready.</div>
+              <div class="log-tabs-container">
+                <div id="logTabs" class="log-tabs">
+                    <button
+                        class="camera-tab log-tab active"
+                        data-tab-id="live"
+                    >
+                        LIVE
+                    </button>
+                </div>
+              
+                <div id="logPanels" class="log-panels">
+                  <div
+                    id="logViewer"
+                    class="log-viewer log-panel active"
+                    data-tab-id="live"
+                  >
+                    <div class="log-line info">ITS Test Ready.</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

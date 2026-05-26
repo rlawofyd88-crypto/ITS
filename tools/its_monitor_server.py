@@ -766,7 +766,56 @@ class ItsHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(payload)
-
+        elif request_path == "/get-tc-log":
+            try:
+                query = parse_qs(parsed_url.query)
+        
+                camera_id = query.get("camera", [""])[0]
+                scene_name = query.get("scene", [""])[0]
+                test_name = query.get("test", [""])[0]
+        
+                matched_event = None
+        
+                for event in reversed(self.monitor.published_events):
+                    if (
+                        event.get("cameraId") == camera_id
+                        and event.get("scene") == scene_name
+                        and event.get("test") == test_name
+                    ):
+                        matched_event = event
+                        break
+                    
+                logs = []
+        
+                if matched_event:
+                    logs = self.monitor.read_event_log_lines(
+                        matched_event
+                    )
+        
+                payload = json.dumps({
+                    "logs": logs
+                }).encode("utf-8")
+        
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type",
+                    "application/json"
+                )
+                self.send_header(
+                    "Access-Control-Allow-Origin",
+                    "*"
+                )
+                self.end_headers()
+        
+                self.wfile.write(payload)
+        
+            except Exception as e:
+                print(f"TC Log Error: {e}")
+        
+                self.send_response(200)
+                self.end_headers()
+        
+                self.wfile.write(b'{"logs":[]}')
         elif request_path == "/get-live-logs":
             try:
                 query = parse_qs(parsed_url.query)

@@ -711,3 +711,52 @@ input[type="range"] {
 .log-warn { color: #ce9178; }
 .log-error { color: #f44747; font-weight: bold; }
 .log-success { color: #6a9955; }
+
+.log-tabs-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.log-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.log-panels {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+.log-panel {
+    display: none;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.log-panel.active {
+    display: block;
+}
+
+.tc-item {
+    cursor: pointer;
+    user-select: none;
+
+    transition:
+        background 0.16s ease,
+        border-color 0.16s ease,
+        transform 0.16s ease;
+}
+
+.tc-item:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.tc-item:hover .tc-name,
+.tc-item:hover .tc-status {
+    cursor: pointer;
+}
