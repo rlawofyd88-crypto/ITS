@@ -774,3 +774,33 @@ input[type="range"] {
 .tc-item:hover .tc-status {
     cursor: pointer;
 }
+
+.launcher-button {
+  height: 38px;
+  padding: 0 18px;
+
+  border: 1px solid rgba(121, 215, 255, 0.35);
+  border-radius: 6px;
+
+  background: rgba(121, 215, 255, 0.12);
+  color: #dff7ff;
+
+  font-size: 13px;
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+      background 0.18s ease,
+      border-color 0.18s ease,
+      transform 0.18s ease;
+}
+
+.launcher-button:hover {
+  background: rgba(121, 215, 255, 0.22);
+  border-color: rgba(121, 215, 255, 0.7);
+}
+
+.launcher-button:active {
+  transform: translateY(1px);
+}

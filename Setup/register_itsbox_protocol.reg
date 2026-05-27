@@ -1,0 +1,12 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\itsbox]
+@="URL:ITSBox Protocol"
+"URL Protocol"=""
+
+[HKEY_CLASSES_ROOT\itsbox\shell]
+
+[HKEY_CLASSES_ROOT\itsbox\shell\open]
+
+[HKEY_CLASSES_ROOT\itsbox\shell\open\command]
+@="\"D:\\its_launcher.bat\" \"%1\""
