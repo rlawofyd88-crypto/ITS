@@ -113,18 +113,6 @@ h2 {
   line-height: 1.15;
 }
 
-.live-caption {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 18px;
-  font-weight: 600;
-  max-width: min(42vw, 520px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.35;
-}
-
 .status-strip {
   min-width: 370px;
   display: flex;

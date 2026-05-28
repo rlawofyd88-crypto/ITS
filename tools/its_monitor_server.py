@@ -60,6 +60,16 @@ TEST_RESULT_RE = re.compile(r"^\s*Result:\s*(PASS|FAIL|SKIP|ERROR)\s*$", re.IGNO
 TEST_RECORD_RE = re.compile(r"^\s*Type:\s*Record\s*$", re.IGNORECASE | re.MULTILINE)
 TEST_END_TIME_RE = re.compile(r"^\s*End Time:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
 TEST_LOG_RESULT_RE = re.compile(r"\[Test\]\s+(test_[A-Za-z0-9_]+)\s+(PASS|FAIL|SKIP|ERROR)\b", re.IGNORECASE)
+DEBUG_LOG_LINE_RE = re.compile(
+    r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(DEBUG|INFO)\b"
+)
+
+DEBUG_SUMMARY_PREFIXES = (
+    "Total time elapsed",
+    "Artifacts are saved in",
+    "Test summary saved in",
+    "Test results:",
+)
 TEST_NAME_ALIASES = {
     ("scene1_1", "test_ae_precapture"): "test_ae_precapture_trigger",
     ("scene1_3", "test_sensor_sensitivity_priority"): "test_sensitivity_priority",
@@ -397,7 +407,7 @@ class ITSMonitor:
     def discover_tc_result_events(self, its_dir: Path) -> List[Dict[str, Any]]:
         events: Dict[tuple[str, str, str], Dict[str, Any]] = {}
 
-        for log_file in its_dir.rglob("test_log.INFO"):
+        for log_file in its_dir.rglob("test_log.DEBUG"):
             camera_id = self.get_camera_id_from_path(log_file, its_dir)
             scene_name = self.get_scene_name_from_path(log_file, its_dir)
             if not scene_name:
@@ -479,11 +489,27 @@ class ITSMonitor:
         except OSError:
             return [f"[{event.get('cameraId', DEFAULT_CAMERA_ID)}] [Test] {event['test']} {self.status_text(event['status'])}"]
 
-        return [
-            line.strip()
-            for line in text.replace("\r", "").split("\n")
-            if line.strip()
-        ]
+        filtered_lines = []
+
+        for line in text.replace("\r", "").split("\n"):
+            stripped = line.strip()
+
+            if not stripped:
+                continue
+            
+            # DEBUG / INFO 로그 라인
+            if DEBUG_LOG_LINE_RE.match(stripped):
+                if "[aaudio.hw_burst_min_usec]" in stripped:
+                    continue
+
+                filtered_lines.append(stripped)
+                continue
+            
+            # Summary 라인
+            if stripped.startswith(DEBUG_SUMMARY_PREFIXES):
+                filtered_lines.append(stripped)
+
+        return filtered_lines
 
     def get_released_log_data(self, since_sequence: int = 0) -> List[Dict[str, Any]]:
         with self.replay_lock:
