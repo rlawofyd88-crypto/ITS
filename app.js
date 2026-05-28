@@ -266,6 +266,7 @@ const LOG_RESULT_PAUSE_MS = 60;
 const LOG_OUTPUT_MAX_WAIT_MS = 420;
 const LOG_OUTPUT_IDLE_SLEEP_MS = 20;
 const LOG_OUTPUT_EMPTY_DELAY_MS = 40;
+const LOG_TIMESTAMP_RE = /^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)/;
 let liveFeedObjectUrl = null;
 let currentCaptureKey = "";
 let lastAppliedCaptureSequence = 0;
@@ -518,6 +519,31 @@ function applyCaptureInfo(capture) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseLogTimestamp(text) {
+    const match = text.match(LOG_TIMESTAMP_RE);
+
+    if (!match) {
+        return null;
+    }
+
+    const [
+        ,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millis
+    ] = match;
+
+    return (
+        (((Number(hour) * 60)
+            + Number(minute)) * 60
+            + Number(second)) * 1000
+        + Number(millis)
+    );
 }
 
 function isFocusedTc(sceneName, testName, cameraId = selectedCameraId) {
@@ -1270,61 +1296,126 @@ async function fetchLiveLogs() {
     }
 }
 
-function startLogSimulation() {
-    const logViewer = document.getElementById("logViewer");
+async function startLogSimulation() {
+    const logViewer =
+        document.getElementById("logViewer");
 
-    setInterval(() => {
-        if (isPausing || logQueue.length === 0 || !logViewer) return;
+    let previousTimestamp = null;
+
+    while (true) {
+
+        if (
+            isPausing ||
+            logQueue.length === 0 ||
+            !logViewer
+        ) {
+            await sleep(LOG_OUTPUT_IDLE_SLEEP_MS);
+            continue;
+        }
 
         const log = logQueue.shift();
 
-        // 1. Scene 변경 플래그를 만났을 때
+        // CAMERA CHANGE
         if (log.type === "CAMERA_CHANGE") {
             needsClear = true;
-            return;
+            previousTimestamp = null;
+            continue;
         }
 
-        // 2. 실제 로그를 출력하기 직전, 비우기 예약이 되어 있다면?
+        // 실제 로그 출력 직전 clear
         if (needsClear) {
-            logViewer.innerHTML = ""; // 여기서 비웁니다!
+            logViewer.innerHTML = "";
             renderedLogs.clear();
-            needsClear = false;       // 예약 해제
+            needsClear = false;
         }
-
-        // 3. 기존 출력 로직 시작
-        const logLine = document.createElement("div");
-        logLine.className = "log-line-raw";
 
         const rawText = log.text;
+
+        // summary line 은 즉시 출력
+        const isSummaryLine =
+            rawText.startsWith("Total time elapsed")
+            || rawText.startsWith("Artifacts are saved in")
+            || rawText.startsWith("Test summary saved in")
+            || rawText.startsWith("Test results:");
+
+        const currentTimestamp =
+            parseLogTimestamp(rawText);
+
+        // timestamp 기반 delay
+        if (
+            !isSummaryLine &&
+            previousTimestamp !== null &&
+            currentTimestamp !== null
+        ) {
+            const delta =
+                currentTimestamp - previousTimestamp;
+
+            // 너무 긴 delay 방지
+            const clampedDelay =
+                Math.max(
+                    0,
+                    Math.min(delta, 300)
+                );
+
+            if (clampedDelay > 0) {
+                await sleep(clampedDelay);
+            }
+        }
+
+        if (currentTimestamp !== null) {
+            previousTimestamp = currentTimestamp;
+        }
+
+        // 로그 출력
+        const logLine =
+            document.createElement("div");
+
+        logLine.className = "log-line-raw";
+
         let text = rawText;
 
         if (text.includes("==========>")) {
-            text = `<b style="color: #ffca28; font-size: 1.1em;">${text}</b>`;
+            text =
+                `<b style="color: #ffca28; font-size: 1.1em;">${text}</b>`;
         } else {
             text = text
-                .replace("INFO", '<span class="log-info-tag">INFO</span>')
-                .replace("PASS", '<span class="log-pass-tag">PASS</span>')
-                .replace("FAIL", '<span class="log-fail-tag">FAIL</span>');
+                .replace(
+                    "INFO",
+                    '<span class="log-info-tag">INFO</span>'
+                )
+                .replace(
+                    "PASS",
+                    '<span class="log-pass-tag">PASS</span>'
+                )
+                .replace(
+                    "FAIL",
+                    '<span class="log-fail-tag">FAIL</span>'
+                );
         }
+
         logLine.innerHTML = text;
+
         logViewer.appendChild(logLine);
 
         if (logAutoFollow) {
-            logViewer.scrollTop = logViewer.scrollHeight;
+            logViewer.scrollTop =
+                logViewer.scrollHeight;
         }
 
+        // TC sync
         if (rawText.includes("Test results:")) {
+
             const nextTcUpdate =
                 pendingTcUpdates.shift();
 
             if (nextTcUpdate) {
-            
+
                 const targetScene =
                     itsTestStructure.find(
                         (scene) =>
                             scene.scene === nextTcUpdate.scene
                     );
-                  
+
                 if (
                     targetScene &&
                     targetScene.tests[
@@ -1335,17 +1426,17 @@ function startLogSimulation() {
                         nextTcUpdate.test
                     ] = nextTcUpdate.status;
                 }
-              
+
                 renderTcTree();
-              
+
                 setCurrentTcFocus(
                     {
                         cameraId:
                             nextTcUpdate.cameraId,
-                    
+
                         scene:
                             nextTcUpdate.scene,
-                    
+
                         test:
                             nextTcUpdate.test
                     },
@@ -1354,7 +1445,7 @@ function startLogSimulation() {
                         behavior: "smooth"
                     }
                 );
-              
+
                 applyCurrentTcFocus({
                     scroll: false,
                     behavior: "auto"
@@ -1362,11 +1453,12 @@ function startLogSimulation() {
             }
         }
 
-        // 성능 유지용
         while (logViewer.childElementCount > 300) {
-            logViewer.removeChild(logViewer.firstChild);
+            logViewer.removeChild(
+                logViewer.firstChild
+            );
         }
-    }, LOG_RENDER_INTERVAL_MS);
+    }
 }
 
 function init() {
