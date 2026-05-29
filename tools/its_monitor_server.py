@@ -364,6 +364,36 @@ class ITSMonitor:
         self.active_execution = execution
         self.active_executions_by_camera[normalized_camera_id] = execution
 
+    def clear_active_execution(
+        self,
+        camera_id: str,
+        scene_name: str,
+        test_name: str,
+    ) -> None:
+        normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
+        normalized_test_name = self.normalize_test_name(
+            scene_name, test_name.replace(".py", "")
+        )
+        execution = self.active_executions_by_camera.get(normalized_camera_id)
+        if (
+            execution
+            and execution.get("scene") == scene_name
+            and execution.get("test") == normalized_test_name
+        ):
+            self.active_executions_by_camera.pop(normalized_camera_id, None)
+
+        if (
+            self.active_execution
+            and self.active_execution.get("cameraId") == normalized_camera_id
+            and self.active_execution.get("scene") == scene_name
+            and self.active_execution.get("test") == normalized_test_name
+        ):
+            self.active_execution = max(
+                self.active_executions_by_camera.values(),
+                key=lambda item: item.get("updatedAt", 0),
+                default=None,
+            )
+
     def get_active_execution(self, camera_id: str | None = None) -> Dict[str, Any] | None:
         with self.replay_lock:
             if camera_id:
@@ -588,6 +618,7 @@ class ITSMonitor:
                     "test", "")
                 self.append_log_entry(
                     camera_id, scene_name, test_name, stripped, "LIVE_LOG")
+                self.clear_active_execution(camera_id, scene_name, test_name)
                 self.fixed_log_context = {}
                 continue
 
@@ -1120,6 +1151,7 @@ class ItsHandler(BaseHTTPRequestHandler):
         if request_path == "/its-status.json":
             latest_dir = self.monitor.get_latest_dir()
             file_results = self.monitor.parse_tc_results(latest_dir) if latest_dir else {}
+            self.monitor.collect_live_log_updates(latest_dir)
             camera_ids = self.monitor.get_camera_ids(latest_dir)
             active_camera_id = self.monitor.get_active_camera_id(camera_ids)
             active_execution = self.monitor.get_active_execution(active_camera_id or None)
