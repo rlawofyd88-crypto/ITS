@@ -19,7 +19,6 @@ const dutMirror = document.querySelector("#dutMirror");
 const liveBadge = document.querySelector("#liveBadge");
 const cameraScene = document.querySelector("#cameraScene");
 const runNameBadge = document.querySelector("#runNameBadge");
-const runTabs = document.querySelector("#runTabs");
 const cameraTabs = document.querySelector("#cameraTabs");
 
 const tcListContainer = document.querySelector("#tcList");
@@ -39,8 +38,6 @@ const logFilterGroup = document.querySelector("#logFilterGroup");
 let tcLogTabs = [];
 
 let currentCaptureTabKey = "";
-
-let monitorConnected = false;
 
 const MAX_TC_LOG_TABS = 5;
 
@@ -545,49 +542,7 @@ function applyRunInfo(runInfo) {
   runNameBadge.title = runInfo?.path || runName;
   runNameBadge.classList.toggle("waiting", !runInfo?.name);
 }
-function renderRunTabs(runs = [], idle = false) {
 
-    if (!runTabs) {
-        return;
-    }
-
-    runTabs.innerHTML = "";
-    if (!monitorConnected || idle || runs.length === 0) {
-    
-        const waiting =
-            document.createElement("div");
-    
-        waiting.className =
-            "run-tab waiting";
-    
-        waiting.textContent =
-            "Waiting";
-    
-        runTabs.appendChild(waiting);
-    
-        return;
-    }
-    runs.forEach((run) => {
-
-        const button =
-            document.createElement("button");
-
-        button.className =
-            "run-tab";
-
-        if (run.isLatest) {
-            button.classList.add("active");
-        }
-
-        button.textContent =
-            run.name;
-
-        button.dataset.runName =
-            run.name;
-
-        runTabs.appendChild(button);
-    });
-}
 function getCameraIdList(cameras) {
   return (Array.isArray(cameras) ? cameras : [])
     .map((camera) => camera?.id || "")
@@ -1482,10 +1437,6 @@ async function showTcCaptureTab(
 
 function applyDashboardData(data, { scrollFocusedTc = false, followActiveCamera = false } = {}) {
   applyRunInfo(data.run);
-  renderRunTabs(
-      data.run?.runs || [],
-      data.idle === true
-  );
   applyCameraState(data, { followActive: followActiveCamera });
 
   if (data.capture) {
@@ -1505,7 +1456,6 @@ async function updateStatus() {
   try {
     const response = await fetch(`${monitorEndpoint}/its-status.json`, { cache: "no-store" });
     const data = await response.json();
-    monitorConnected = true;
 
     if (data) {
       const captureSequence = Number(data.capture?.sequence || 0);
@@ -1523,8 +1473,6 @@ async function updateStatus() {
       });
     }
   } catch (error) {
-    monitorConnected = false;
-    renderRunTabs([], true);
     console.error("데이터 수신 오류:", error);
   } finally {
     statusUpdateInProgress = false;

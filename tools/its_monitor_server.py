@@ -1094,36 +1094,6 @@ class ITSMonitor:
                 "defectDetect": calc_score(tests_by_metric["defectDetect"])
             }
         }
-    def get_available_runs(self):
-        runs = []
-    
-        for path in self.root_dir.glob("CameraITS_*"):
-            if not path.is_dir():
-                continue
-            
-            try:
-                runs.append({
-                    "name": path.name,
-                    "path": str(path),
-                    "mtime": path.stat().st_mtime
-                })
-            except OSError:
-                pass
-            
-        runs.sort(
-            key=lambda item: item["mtime"],
-            reverse=True
-        )
-    
-        latest_name = runs[0]["name"] if runs else ""
-    
-        return [
-            {
-                "name": item["name"],
-                "isLatest": item["name"] == latest_name
-            }
-            for item in runs
-        ]
 
 class ItsHandler(BaseHTTPRequestHandler):
     monitor: ITSMonitor
@@ -1157,7 +1127,6 @@ class ItsHandler(BaseHTTPRequestHandler):
             active_results = file_results.get(active_camera_id, {}) if active_camera_id else {}
             # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
             response_data = {
-                "idle": len(self.monitor.pending_results) == 0,
                 "tree": self.monitor.get_updated_structure(active_results),
                 "analysis": self.monitor.generate_analysis_data(active_results),
                 "cameras": [
@@ -1174,7 +1143,6 @@ class ItsHandler(BaseHTTPRequestHandler):
                     "path": str(latest_dir) if latest_dir else "",
                 },
                 "activeExecution": self.monitor.get_active_execution(active_camera_id or None),
-                "runs": self.monitor.get_available_runs(),
                 "capture": self.monitor.get_capture_info(active_camera_id or None)
             }
             payload = json.dumps(response_data).encode("utf-8")
@@ -1402,7 +1370,6 @@ def parse_args():
     parser.add_argument("--port", type=int)
     parser.add_argument("--replay-interval", type=float)
     return parser.parse_args()
-
 
 
 def main():
