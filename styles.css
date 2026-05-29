@@ -709,11 +709,48 @@ input[type="range"] {
     min-height: 0;
 }
 
+.log-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
 .log-tabs {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
+}
+
+.log-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.log-filter-button {
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.06);
+    color: rgba(244, 241, 232, 0.82);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.log-filter-button.active {
+    background: rgba(97, 211, 148, 0.18);
+    border-color: rgba(97, 211, 148, 0.5);
+    color: #dff6e8;
+}
+
+.log-line-hidden {
+    display: none;
 }
 
 .log-panels {
@@ -834,18 +871,48 @@ input[type="range"] {
   min-height: 0;
 }
 
-.future-placeholder {
+.current-test-card {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding: 28px;
+  border: 1px solid rgba(97, 211, 148, 0.18);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(97, 211, 148, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(12, 20, 18, 0.96), rgba(7, 12, 11, 0.98));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+}
 
-  display: grid;
-  place-items: center;
-
-  border: 1px dashed rgba(255,255,255,0.14);
-
-  color: rgba(255,255,255,0.28);
-
+.current-test-scene {
+  color: #8fd6ae;
   font-size: 18px;
   font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.current-test-name {
+  color: #f4f1e8;
+  font-size: clamp(28px, 2.2vw, 42px);
+  font-weight: 800;
+  line-height: 1.1;
+  word-break: break-word;
+}
+
+.current-test-order {
+  color: #ffd36b;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.current-test-description {
+  margin: 0;
+  color: rgba(244, 241, 232, 0.88);
+  font-size: 19px;
+  line-height: 1.6;
 }
 
 .log-panel-wrapper {

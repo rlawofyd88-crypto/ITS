@@ -60,6 +60,11 @@ TEST_RESULT_RE = re.compile(r"^\s*Result:\s*(PASS|FAIL|SKIP|ERROR)\s*$", re.IGNO
 TEST_RECORD_RE = re.compile(r"^\s*Type:\s*Record\s*$", re.IGNORECASE | re.MULTILINE)
 TEST_END_TIME_RE = re.compile(r"^\s*End Time:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
 TEST_LOG_RESULT_RE = re.compile(r"\[Test\]\s+(test_[A-Za-z0-9_]+)\s+(PASS|FAIL|SKIP|ERROR)\b", re.IGNORECASE)
+CURRENT_TEST_LOG_RE = re.compile(r"\[Test\]\s+(test_[A-Za-z0-9_]+)\b", re.IGNORECASE)
+EXECUTING_TEST_CLASS_RE = re.compile(
+    r'Executing test class "(?P<class>[A-Za-z0-9]+)"',
+    re.IGNORECASE,
+)
 DEBUG_LOG_LINE_RE = re.compile(
     r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(DEBUG|INFO)\b"
 )
@@ -76,6 +81,27 @@ TEST_NAME_ALIASES = {
 }
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 DEFAULT_CAMERA_ID = "cam_id_0"
+LIVE_STDOUT_SUFFIX = "_stdout.txt"
+RUN_ALL_TESTS_LIVE_LOG = "run_all_tests_live.log"
+LIVE_MOBLY_LOG_CANDIDATES = ("test_log.DEBUG", "test_log.INFO")
+FIXED_LIVE_LOG_PREFIX = "its_live"
+FIXED_LIVE_LOG_DIRNAME = "its_live"
+FIXED_LIVE_LOG_CANDIDATES = (
+    f"{FIXED_LIVE_LOG_PREFIX}.DEBUG",
+    f"{FIXED_LIVE_LOG_PREFIX}.INFO",
+)
+LIVE_LOG_PREFIX_RE = re.compile(
+    r"^\[(?P<scene>[^\]/]+)/(?P<test>[^\]]+)\]\s*(?P<text>.*)$"
+)
+TIMESTAMPED_TEST_DIR_RE = re.compile(
+    r"^\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}-\d{3}_(?P<test>[A-Za-z0-9]+)$"
+)
+LIVE_LOG_START_RE = re.compile(
+    r".*LIVE_LOG_START scene=(?P<scene>\S*) camera=(?P<camera>\S*) test=(?P<test>\S*)"
+)
+LIVE_LOG_END_RE = re.compile(
+    r".*LIVE_LOG_END scene=(?P<scene>\S*) camera=(?P<camera>\S*) test=(?P<test>\S*)"
+)
 
 class ITSMonitor:
     def __init__(self, root_dir: Path, replay_interval: float = 0.5):
@@ -92,6 +118,13 @@ class ITSMonitor:
         self.replay_sequence = 0
         self.log_scene_name = ""
         self.replay_lock = Lock()
+        self.log_entries: List[Dict[str, Any]] = []
+        self.log_sequence = 0
+        self.live_file_offsets: Dict[str, int] = {}
+        self.last_emitted_log_camera_id = ""
+        self.fixed_log_context: Dict[str, str] = {}
+        self.active_execution: Dict[str, Any] | None = None
+        self.active_executions_by_camera: Dict[str, Dict[str, Any]] = {}
 
     def status_value(self, status: str) -> int:
         normalized = status.upper()
@@ -146,6 +179,13 @@ class ITSMonitor:
         self.replay_sequence = 0
         self.log_scene_name = ""
         self.last_log_camera_id = ""
+        self.log_entries = []
+        self.log_sequence = 0
+        self.live_file_offsets = {}
+        self.last_emitted_log_camera_id = ""
+        self.fixed_log_context = {}
+        self.active_execution = None
+        self.active_executions_by_camera = {}
 
     def copy_visible_results(self) -> Dict[str, Dict[str, Dict[str, int]]]:
         return {
@@ -251,7 +291,403 @@ class ITSMonitor:
 
         return sorted(camera_ids, key=self.camera_sort_key)
 
+    def camel_to_snake(self, value: str) -> str:
+        value = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", value)
+        value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+        return value.lower()
+
+    def append_log_entry(
+        self,
+        camera_id: str,
+        scene_name: str,
+        test_name: str,
+        text: str,
+        entry_type: str = "LOG",
+    ) -> None:
+        if not text:
+            return
+
+        normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
+        normalized_test_name = test_name.replace(".py", "")
+
+        if (
+            self.last_emitted_log_camera_id
+            and self.last_emitted_log_camera_id != normalized_camera_id
+        ):
+            self.log_sequence += 1
+            self.log_entries.append({
+                "type": "CAMERA_CHANGE",
+                "id": f"camera:{self.log_sequence}:{normalized_camera_id}",
+                "sequence": self.log_sequence,
+                "cameraId": normalized_camera_id,
+                "scene": scene_name,
+                "test": normalized_test_name,
+                "text": f"--- CAMERA_CHANGED_{normalized_camera_id} ---",
+            })
+
+        self.last_emitted_log_camera_id = normalized_camera_id
+        self.log_sequence += 1
+        self.log_entries.append({
+            "type": entry_type,
+            "id": f"log:{self.log_sequence}:{normalized_camera_id}:{scene_name}:{normalized_test_name}",
+            "sequence": self.log_sequence,
+            "cameraId": normalized_camera_id,
+            "scene": scene_name,
+            "test": normalized_test_name,
+            "text": text,
+        })
+
+    def set_active_execution(
+        self,
+        camera_id: str,
+        scene_name: str,
+        test_name: str,
+        artifact_dir: Path | None = None,
+    ) -> None:
+        if not scene_name or not test_name:
+            return
+
+        normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
+        normalized_test_name = self.normalize_test_name(
+            scene_name, test_name.replace(".py", "")
+        )
+        execution = {
+            "cameraId": normalized_camera_id,
+            "cameraLabel": normalized_camera_id,
+            "scene": scene_name,
+            "test": normalized_test_name,
+            "sourceDir": str(artifact_dir) if artifact_dir else "",
+            "updatedAt": time.time(),
+        }
+        self.active_execution = execution
+        self.active_executions_by_camera[normalized_camera_id] = execution
+
+    def get_active_execution(self, camera_id: str | None = None) -> Dict[str, Any] | None:
+        with self.replay_lock:
+            if camera_id:
+                execution = self.active_executions_by_camera.get(camera_id)
+                return dict(execution) if execution else None
+            return dict(self.active_execution) if self.active_execution else None
+
+    def parse_live_log_path(self, log_path: Path, its_dir: Path) -> tuple[str, str, str]:
+        camera_id = self.get_camera_id_from_path(log_path, its_dir)
+        try:
+            relative_parts = log_path.relative_to(its_dir).parts
+        except ValueError:
+            relative_parts = log_path.parts
+
+        scene_name = ""
+        for part in relative_parts:
+            if part in SCENE_ORDER:
+                scene_name = part
+                break
+
+        test_name = log_path.stem
+        if test_name.endswith(LIVE_STDOUT_SUFFIX.replace(".txt", "")):
+            test_name = test_name[: -len(LIVE_STDOUT_SUFFIX.replace(".txt", ""))]
+        if test_name.endswith("_stdout"):
+            test_name = test_name[:-7]
+
+        return camera_id, scene_name, test_name
+
+    def parse_mobly_live_log_path(self, log_path: Path, its_dir: Path) -> tuple[str, str, str]:
+        camera_id = self.get_camera_id_from_path(log_path, its_dir)
+        scene_name = self.get_scene_name_from_path(log_path, its_dir) or ""
+        try:
+            relative_parts = log_path.relative_to(its_dir).parts
+        except ValueError:
+            relative_parts = log_path.parts
+
+        def normalize_candidate(raw_name: str) -> str:
+            snake_name = self.camel_to_snake(raw_name)
+            if snake_name.endswith("_test"):
+                snake_name = snake_name[:-5]
+            normalized = f"test_{snake_name}"
+            return self.normalize_test_name(scene_name, normalized)
+
+        test_name = ""
+        for part in reversed(relative_parts):
+            matched = TIMESTAMPED_TEST_DIR_RE.match(part)
+            if matched:
+                test_name = normalize_candidate(matched.group("test"))
+                break
+
+        if test_name and (scene_name, test_name) in TEST_INDEX:
+            return camera_id, scene_name, test_name
+
+        fallback_candidates = [log_path.parent.name]
+        if len(relative_parts) >= 2:
+            fallback_candidates.append(relative_parts[-2])
+        try:
+            fallback_candidates.extend(
+                child.name
+                for child in log_path.parent.iterdir()
+                if child.is_dir() and child.name.endswith("Test")
+            )
+        except OSError:
+            pass
+
+        for candidate in fallback_candidates:
+            if not candidate:
+                continue
+            normalized = normalize_candidate(candidate)
+            if not scene_name or (scene_name, normalized) in TEST_INDEX:
+                test_name = normalized
+                break
+
+        return camera_id, scene_name, test_name
+
+    def collect_incremental_mobly_log(self, log_path: Path, its_dir: Path) -> None:
+        try:
+            stat_result = log_path.stat()
+        except OSError:
+            return
+
+        path_key = str(log_path)
+        previous_offset = self.live_file_offsets.get(path_key, 0)
+        if previous_offset > stat_result.st_size:
+            previous_offset = 0
+
+        if previous_offset == stat_result.st_size:
+            return
+
+        camera_id, scene_name, test_name = self.parse_mobly_live_log_path(log_path, its_dir)
+        if not scene_name or not test_name:
+            return
+        self.set_active_execution(camera_id, scene_name, test_name, log_path.parent)
+
+        try:
+            with log_path.open("r", encoding="utf-8", errors="ignore") as file:
+                file.seek(previous_offset)
+                new_text = file.read()
+                self.live_file_offsets[path_key] = file.tell()
+        except OSError:
+            return
+
+        for line in new_text.replace("\r", "").split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            current_test_name = test_name
+            current_test_match = CURRENT_TEST_LOG_RE.search(stripped)
+            if current_test_match:
+                current_test_name = self.normalize_test_name(
+                    scene_name,
+                    current_test_match.group(1),
+                )
+                self.set_active_execution(camera_id, scene_name, current_test_name, log_path.parent)
+                test_name = current_test_name
+            else:
+                class_match = EXECUTING_TEST_CLASS_RE.search(stripped)
+                if class_match:
+                    current_test_name = self.normalize_test_name(
+                        scene_name,
+                        f"test_{self.camel_to_snake(class_match.group('class')).removesuffix('_test')}",
+                    )
+                    self.set_active_execution(camera_id, scene_name, current_test_name, log_path.parent)
+                    test_name = current_test_name
+
+            self.append_log_entry(camera_id, scene_name, current_test_name, stripped, "LIVE_LOG")
+
+    def collect_live_mobly_logs(self, its_dir: Path) -> bool:
+        selected_logs = []
+        for debug_log in its_dir.rglob("test_log.DEBUG"):
+            if debug_log.is_file():
+                selected_logs.append(debug_log)
+
+        if not selected_logs:
+            for info_log in its_dir.rglob("test_log.INFO"):
+                if info_log.is_file():
+                    selected_logs.append(info_log)
+
+        selected_logs.sort(key=self.path_mtime)
+        for log_path in selected_logs:
+            self.collect_incremental_mobly_log(log_path, its_dir)
+
+        return bool(selected_logs)
+
+    def collect_fixed_live_logs(self, its_dir: Path) -> bool:
+        selected_logs = []
+        search_roots = [its_dir]
+        parent_dir = its_dir.parent if its_dir.parent != its_dir else None
+        if parent_dir:
+            search_roots.append(parent_dir)
+            search_roots.append(parent_dir / FIXED_LIVE_LOG_DIRNAME)
+
+        for root in search_roots:
+            for file_name in FIXED_LIVE_LOG_CANDIDATES:
+                log_path = root / file_name
+                if log_path.is_file() and log_path not in selected_logs:
+                    selected_logs.append(log_path)
+
+        selected_logs.sort(key=self.path_mtime)
+        for log_path in selected_logs:
+          self.collect_incremental_fixed_live_log(log_path)
+
+        return bool(selected_logs)
+
+    def collect_incremental_fixed_live_log(self, log_path: Path) -> None:
+        try:
+            stat_result = log_path.stat()
+        except OSError:
+            return
+
+        path_key = str(log_path)
+        previous_offset = self.live_file_offsets.get(path_key, 0)
+        if previous_offset > stat_result.st_size:
+            previous_offset = 0
+
+        if previous_offset == stat_result.st_size:
+            return
+
+        try:
+            with log_path.open("r", encoding="utf-8", errors="ignore") as file:
+                file.seek(previous_offset)
+                new_text = file.read()
+                self.live_file_offsets[path_key] = file.tell()
+        except OSError:
+            return
+
+        for line in new_text.replace("\r", "").split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            start_match = LIVE_LOG_START_RE.match(stripped)
+            if start_match:
+                self.fixed_log_context = {
+                    "cameraId": start_match.group("camera") or DEFAULT_CAMERA_ID,
+                    "scene": start_match.group("scene") or "",
+                    "test": start_match.group("test") or "",
+                }
+                self.set_active_execution(
+                    self.fixed_log_context["cameraId"],
+                    self.fixed_log_context["scene"],
+                    self.fixed_log_context["test"],
+                    log_path.parent,
+                )
+                self.append_log_entry(
+                    self.fixed_log_context["cameraId"],
+                    self.fixed_log_context["scene"],
+                    self.fixed_log_context["test"],
+                    stripped,
+                    "LIVE_LOG",
+                )
+                continue
+
+            end_match = LIVE_LOG_END_RE.match(stripped)
+            if end_match:
+                camera_id = end_match.group("camera") or self.fixed_log_context.get(
+                    "cameraId", DEFAULT_CAMERA_ID)
+                scene_name = end_match.group("scene") or self.fixed_log_context.get(
+                    "scene", "")
+                test_name = end_match.group("test") or self.fixed_log_context.get(
+                    "test", "")
+                self.append_log_entry(
+                    camera_id, scene_name, test_name, stripped, "LIVE_LOG")
+                self.fixed_log_context = {}
+                continue
+
+            camera_id = self.fixed_log_context.get("cameraId", DEFAULT_CAMERA_ID)
+            scene_name = self.fixed_log_context.get("scene", "")
+            test_name = self.fixed_log_context.get("test", "")
+            self.append_log_entry(
+                camera_id, scene_name, test_name, stripped, "LIVE_LOG")
+
+    def collect_incremental_live_log(self, log_path: Path, its_dir: Path) -> None:
+        try:
+            stat_result = log_path.stat()
+        except OSError:
+            return
+
+        path_key = str(log_path)
+        previous_offset = self.live_file_offsets.get(path_key, 0)
+        if previous_offset > stat_result.st_size:
+            previous_offset = 0
+
+        if previous_offset == stat_result.st_size:
+            return
+
+        camera_id, scene_name, test_name = self.parse_live_log_path(log_path, its_dir)
+        if not scene_name or not test_name:
+            return
+        self.set_active_execution(camera_id, scene_name, test_name, log_path.parent)
+
+        try:
+            with log_path.open("r", encoding="utf-8", errors="ignore") as file:
+                file.seek(previous_offset)
+                new_text = file.read()
+                self.live_file_offsets[path_key] = file.tell()
+        except OSError:
+            return
+
+        for line in new_text.replace("\r", "").split("\n"):
+            stripped = line.strip()
+            if stripped:
+                self.append_log_entry(camera_id, scene_name, test_name, stripped, "LIVE_LOG")
+
+    def collect_root_live_log(self, its_dir: Path) -> None:
+        log_path = its_dir / RUN_ALL_TESTS_LIVE_LOG
+        if not log_path.is_file():
+            return
+
+        try:
+            stat_result = log_path.stat()
+        except OSError:
+            return
+
+        path_key = str(log_path)
+        previous_offset = self.live_file_offsets.get(path_key, 0)
+        if previous_offset > stat_result.st_size:
+            previous_offset = 0
+
+        if previous_offset == stat_result.st_size:
+            return
+
+        try:
+            with log_path.open("r", encoding="utf-8", errors="ignore") as file:
+                file.seek(previous_offset)
+                new_text = file.read()
+                self.live_file_offsets[path_key] = file.tell()
+        except OSError:
+            return
+
+        for line in new_text.replace("\r", "").split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            prefix_match = LIVE_LOG_PREFIX_RE.match(stripped)
+            if prefix_match:
+                scene_name = prefix_match.group("scene")
+                test_name = prefix_match.group("test").replace(".py", "")
+                text = prefix_match.group("text").strip() or stripped
+                self.append_log_entry(DEFAULT_CAMERA_ID, scene_name, test_name, text, "LIVE_LOG")
+
+    def collect_live_log_updates(self, its_dir: Path | None) -> None:
+        if not its_dir or not its_dir.is_dir():
+            return
+
+        found_fixed_live_logs = self.collect_fixed_live_logs(its_dir)
+        found_live_mobly_logs = self.collect_live_mobly_logs(its_dir)
+        live_stdout_files = []
+        for log_path in its_dir.rglob(f"*{LIVE_STDOUT_SUFFIX}"):
+            if log_path.is_file():
+                live_stdout_files.append(log_path)
+
+        live_stdout_files.sort(key=self.path_mtime)
+        for log_path in live_stdout_files:
+            self.collect_incremental_live_log(log_path, its_dir)
+
+        if not found_fixed_live_logs and not found_live_mobly_logs and not live_stdout_files:
+            self.collect_root_live_log(its_dir)
+
     def get_active_camera_id(self, camera_ids: List[str]) -> str:
+        active_execution = self.get_active_execution()
+        if active_execution:
+            camera_id = active_execution.get("cameraId", "")
+            if camera_id in camera_ids:
+                return camera_id
         current_event = self.get_current_event()
         if current_event:
             camera_id = current_event.get("cameraId", "")
@@ -478,6 +914,13 @@ class ITSMonitor:
         self.current_event = published_event
         self.current_events_by_camera[camera_id] = published_event
         self.published_events.append(published_event)
+        self.append_log_entry(
+            camera_id,
+            published_event["scene"],
+            published_event["test"],
+            f"[Test] {published_event['test']} {self.status_text(published_event['status'])}",
+            "TC_LOG",
+        )
 
     def read_event_log_lines(self, event: Dict[str, Any]) -> List[str]:
         log_file = event.get("logFile")
@@ -513,67 +956,15 @@ class ITSMonitor:
 
     def get_released_log_data(self, since_sequence: int = 0) -> List[Dict[str, Any]]:
         with self.replay_lock:
-            if since_sequence > self.replay_sequence:
+            self.collect_live_log_updates(self.get_latest_dir())
+
+            if since_sequence > self.log_sequence:
                 since_sequence = 0
-
-            released_events = [
-                dict(event)
-                for event in self.published_events
-                if event.get("sequence", 0) > since_sequence
+            return [
+                dict(entry)
+                for entry in self.log_entries
+                if entry.get("sequence", 0) > since_sequence
             ]
-
-            log_items = []
-
-            for event in released_events:
-                current_camera_id = event.get("cameraId", DEFAULT_CAMERA_ID)
-
-                if (
-                    self.last_log_camera_id
-                    and self.last_log_camera_id != current_camera_id
-                ):
-                    log_items.append({
-                        "type": "CAMERA_CHANGE",
-                        "id": f"camera:{event.get('sequence', 0)}:{current_camera_id}",
-                        "sequence": event.get("sequence", 0),
-                        "cameraId": current_camera_id,
-                        "scene": event["scene"],
-                        "text": f"--- CAMERA_CHANGED_{current_camera_id} ---",
-                    })
-
-                self.last_log_camera_id = current_camera_id
-
-                log_items.append({
-                    "type": "TC_LOG",
-                    "event": event
-                })
-
-            log_data = []
-
-            for item in log_items:
-                if item.get("type") == "CAMERA_CHANGE":
-                    log_data.append(item)
-                    continue
-
-                event = item["event"]
-
-                event_prefix = (
-                    f"{event.get('sequence', 0)}:"
-                    f"{event.get('cameraId', DEFAULT_CAMERA_ID)}:"
-                    f"{event['scene']}:"
-                    f"{event['test']}"
-                )
-
-                for line_index, line in enumerate(self.read_event_log_lines(event)):
-                    log_data.append({
-                        "id": f"{event_prefix}:{line_index}",
-                        "sequence": event.get("sequence", 0),
-                        "cameraId": event.get("cameraId", DEFAULT_CAMERA_ID),
-                        "scene": event["scene"],
-                        "test": event["test"],
-                        "text": line,
-                    })
-
-            return log_data
 
     def release_pending_results(self) -> None:
         if not self.pending_results:
@@ -729,6 +1120,10 @@ class ItsHandler(BaseHTTPRequestHandler):
                 camera_id: self.monitor.get_capture_info(camera_id)
                 for camera_id in camera_ids
             }
+            camera_active_executions = {
+                camera_id: self.monitor.get_active_execution(camera_id)
+                for camera_id in camera_ids
+            }
             active_results = file_results.get(active_camera_id, {}) if active_camera_id else {}
             # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
             response_data = {
@@ -742,10 +1137,12 @@ class ItsHandler(BaseHTTPRequestHandler):
                 "cameraTrees": camera_trees,
                 "cameraAnalysis": camera_analysis,
                 "cameraCaptures": camera_captures,
+                "cameraActiveExecutions": camera_active_executions,
                 "run": {
                     "name": latest_dir.name if latest_dir else "",
                     "path": str(latest_dir) if latest_dir else "",
                 },
+                "activeExecution": self.monitor.get_active_execution(active_camera_id or None),
                 "capture": self.monitor.get_capture_info(active_camera_id or None)
             }
             payload = json.dumps(response_data).encode("utf-8")

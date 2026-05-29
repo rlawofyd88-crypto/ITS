@@ -1,0 +1,3 @@
+LIVE_LOG_START scene=scene0 camera=cam_id_0 test=test_jitter output=C:\Users\jr.kim\Desktop\ITS16_done\ITS\verify_tmp\its_live
+LIVE_LOG_START scene=scene0 camera=cam_id_0 test=test_jitter output=C:\Users\jr.kim\Desktop\ITS16_done\ITS\verify_tmp\its_live
+05-29 11:58:01.000 INFO capture frame

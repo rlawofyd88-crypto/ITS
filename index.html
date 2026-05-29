@@ -107,12 +107,17 @@
                         04 / FUTURE
                     </p>
                   
-                    <h2>New Content Area</h2>
+                    <h2>Current Test Guide</h2>
                 </div>
             </div>
           
-            <div class="future-placeholder">
-                RESERVED
+            <div class="current-test-card" id="currentTestCard">
+                <div class="current-test-scene" id="currentTestScene">scene0</div>
+                <div class="current-test-name" id="currentTestName">test_jitter</div>
+                <div class="current-test-order" id="currentTestOrder">( 1 / 103 )</div>
+                <p class="current-test-description" id="currentTestDescription">
+                    프레임 간 출력이 비정상적으로 흔들리거나 불안정하지 않은지 확인합니다.
+                </p>
             </div>
         </article>
         <article class="panel compare-panel">
@@ -193,13 +198,20 @@
             </div>
           
             <div class="log-tabs-container">
-                <div id="logTabs" class="log-tabs">
-                    <button
-                        class="camera-tab log-tab active"
-                        data-tab-id="live"
-                    >
-                        LIVE
-                    </button>
+                <div class="log-toolbar">
+                    <div id="logTabs" class="log-tabs">
+                        <button
+                            class="camera-tab log-tab active"
+                            data-tab-id="live"
+                        >
+                            LIVE
+                        </button>
+                    </div>
+                    <div class="log-filter-group" id="logFilterGroup" aria-label="Log level filter">
+                        <button class="log-filter-button active" data-log-filter="ALL">ALL</button>
+                        <button class="log-filter-button" data-log-filter="INFO">INFO</button>
+                        <button class="log-filter-button" data-log-filter="DEBUG">DEBUG</button>
+                    </div>
                 </div>
               
                 <div id="logPanels" class="log-panels">
