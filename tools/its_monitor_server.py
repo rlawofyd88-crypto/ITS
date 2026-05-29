@@ -133,6 +133,8 @@ class ITSMonitor:
         return self.status_map.get(normalized, 0)
 
     def status_text(self, status_value: int) -> str:
+        if status_value == 4:
+            return "RUNNING"
         for status, value in self.status_map.items():
             if value == status_value:
                 return status
@@ -1016,12 +1018,17 @@ class ITSMonitor:
     def parse_tc_results(self, its_dir: Path) -> Dict[str, Dict[str, Dict[str, int]]]:
         return self.get_replayed_tc_results(its_dir)
 
-    def get_updated_structure(self, file_results: Dict[str, Dict[str, int]] | None = None) -> List[Dict]:
+    def get_updated_structure(
+        self,
+        file_results: Dict[str, Dict[str, int]] | None = None,
+        active_execution: Dict[str, Any] | None = None,
+    ) -> List[Dict]:
         if file_results is None:
             latest_dir = self.get_latest_dir()
             all_results = self.parse_tc_results(latest_dir) if latest_dir else {}
             active_camera_id = self.get_active_camera_id(self.get_camera_ids(latest_dir))
             file_results = all_results.get(active_camera_id, {}) if active_camera_id else {}
+            active_execution = self.get_active_execution(active_camera_id or None)
         
         updated_list = []
         for item in MASTER_STRUCTURE:
@@ -1029,6 +1036,13 @@ class ITSMonitor:
             new_tests = {}
             for test_key in item["tests"]:
                 new_tests[test_key] = file_results.get(scene_name, {}).get(test_key, 0)
+
+            if (
+                active_execution
+                and active_execution.get("scene") == scene_name
+                and active_execution.get("test") in new_tests
+            ):
+                new_tests[active_execution["test"]] = 4
             updated_list.append({"scene": scene_name, "tests": new_tests})
         return updated_list
 
@@ -1108,8 +1122,12 @@ class ItsHandler(BaseHTTPRequestHandler):
             file_results = self.monitor.parse_tc_results(latest_dir) if latest_dir else {}
             camera_ids = self.monitor.get_camera_ids(latest_dir)
             active_camera_id = self.monitor.get_active_camera_id(camera_ids)
+            active_execution = self.monitor.get_active_execution(active_camera_id or None)
             camera_trees = {
-                camera_id: self.monitor.get_updated_structure(file_results.get(camera_id, {}))
+                camera_id: self.monitor.get_updated_structure(
+                    file_results.get(camera_id, {}),
+                    self.monitor.get_active_execution(camera_id),
+                )
                 for camera_id in camera_ids
             }
             camera_analysis = {
@@ -1127,7 +1145,7 @@ class ItsHandler(BaseHTTPRequestHandler):
             active_results = file_results.get(active_camera_id, {}) if active_camera_id else {}
             # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
             response_data = {
-                "tree": self.monitor.get_updated_structure(active_results),
+                "tree": self.monitor.get_updated_structure(active_results, active_execution),
                 "analysis": self.monitor.generate_analysis_data(active_results),
                 "cameras": [
                     {"id": camera_id, "label": camera_id}
@@ -1142,7 +1160,7 @@ class ItsHandler(BaseHTTPRequestHandler):
                     "name": latest_dir.name if latest_dir else "",
                     "path": str(latest_dir) if latest_dir else "",
                 },
-                "activeExecution": self.monitor.get_active_execution(active_camera_id or None),
+                "activeExecution": active_execution,
                 "capture": self.monitor.get_capture_info(active_camera_id or None)
             }
             payload = json.dumps(response_data).encode("utf-8")

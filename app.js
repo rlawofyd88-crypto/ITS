@@ -426,6 +426,7 @@ const LOG_TIMESTAMP_RE = /^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)/;
 let liveFeedObjectUrl = null;
 let currentCaptureKey = "";
 let lastAppliedCaptureSequence = 0;
+let currentRunPath = "";
 let statusUpdateInProgress = false;
 let currentTcFocus = { cameraId: "", scene: "", test: "" };
 let pendingTcUpdates = [];
@@ -533,6 +534,19 @@ function applyItsData(data) {
 }
 
 function applyRunInfo(runInfo) {
+  const nextRunPath = runInfo?.path || "";
+  if (currentRunPath && nextRunPath && currentRunPath !== nextRunPath) {
+    currentRunPath = nextRunPath;
+    lastAppliedCaptureSequence = 0;
+    currentCaptureKey = "";
+    pendingTcFocus = null;
+    pendingTcUpdates = [];
+    clearLogViewer();
+    lastLogSequence = 0;
+  } else if (!currentRunPath && nextRunPath) {
+    currentRunPath = nextRunPath;
+  }
+
   if (!runNameBadge) {
     return;
   }
@@ -624,10 +638,21 @@ function getSelectedAnalysis(data) {
 }
 
 function getSelectedCapture(data) {
-  if (selectedCameraId && cameraCaptures[selectedCameraId]) {
-    return cameraCaptures[selectedCameraId];
+  const capture = selectedCameraId && cameraCaptures[selectedCameraId]
+    ? cameraCaptures[selectedCameraId]
+    : (data.capture || null);
+  const activeExecution = getSelectedActiveExecution(data);
+
+  if (
+    capture &&
+    activeExecution &&
+    capture.sourceDir &&
+    activeExecution.sourceDir &&
+    capture.sourceDir !== activeExecution.sourceDir
+  ) {
+    return null;
   }
-  return data.capture || null;
+  return capture;
 }
 
 function getSelectedActiveExecution(data) {
@@ -720,6 +745,8 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
 
 function applyCaptureInfo(capture) {
   if (!capture) {
+    currentCaptureKey = "";
+    liveBadge.textContent = "WAIT";
     return false;
   }
 
@@ -949,7 +976,8 @@ function renderTcTree() {
     0: { text: "WAIT", className: "wait" },
     1: { text: "PASS", className: "pass" },
     2: { text: "SKIP", className: "skip" },
-    3: { text: "FAIL", className: "fail" }
+    3: { text: "FAIL", className: "fail" },
+    4: { text: "RUNNING", className: "running" }
   };
 
   itsTestStructure.forEach((item) => {
@@ -977,7 +1005,7 @@ function renderTcTree() {
         <span class="tc-name">${formattedName}</span>
         <span class="tc-status ${currentStatus.className}">${currentStatus.text}</span>
       `;
-      if (statusValue !== 0) {
+      if (statusValue === 1 || statusValue === 2 || statusValue === 3) {
           tcLi.classList.add("clickable");
 
           tcLi.addEventListener("click", () => {
@@ -1439,7 +1467,9 @@ function applyDashboardData(data, { scrollFocusedTc = false, followActiveCamera 
   applyRunInfo(data.run);
   applyCameraState(data, { followActive: followActiveCamera });
 
-  if (data.capture) {
+  if (data.activeExecution) {
+    pendingTcFocus = data.activeExecution;
+  } else if (data.capture) {
     pendingTcFocus = data.capture;
   }
 
@@ -1676,28 +1706,6 @@ async function startLogSimulation() {
                 }
 
                 renderTcTree();
-
-                setCurrentTcFocus(
-                    {
-                        cameraId:
-                            nextTcUpdate.cameraId,
-
-                        scene:
-                            nextTcUpdate.scene,
-
-                        test:
-                            nextTcUpdate.test
-                    },
-                    {
-                        scroll: true,
-                        behavior: "smooth"
-                    }
-                );
-
-                applyCurrentTcFocus({
-                    scroll: false,
-                    behavior: "auto"
-                });
             }
         }
 
