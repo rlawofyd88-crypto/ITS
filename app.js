@@ -20,6 +20,7 @@ const liveBadge = document.querySelector("#liveBadge");
 const cameraScene = document.querySelector("#cameraScene");
 const runNameBadge = document.querySelector("#runNameBadge");
 const cameraTabs = document.querySelector("#cameraTabs");
+const runTabsContainer = document.querySelector("#runTabs");
 
 const tcListContainer = document.querySelector("#tcList");
 
@@ -406,6 +407,7 @@ const tcOrderMap = new Map(
   ])
 );
 const totalTcCount = tcOrderList.length;
+const defaultItsTestStructure = cloneTreeStructure(itsTestStructure);
 
 let needsClear = false;
 let externalDataActive = false;
@@ -439,6 +441,15 @@ let cameraAnalyses = {};
 let cameraCaptures = {};
 let cameraActiveExecutions = {};
 let currentLogFilter = "ALL";
+let latestDashboardData = null;
+let runTabs = [];
+let runCameras = {};
+let runCameraTrees = {};
+let runActiveCameraIds = {};
+let selectedRunId = "";
+let activeRunId = "";
+let selectedRunIsActive = true;
+let currentTreeSignature = "";
 
 function getLogLevel(text) {
   if (text.includes(" DEBUG ") || text.startsWith("DEBUG ") || text.includes("DEBUG:")) {
@@ -512,6 +523,96 @@ function setBadge(status) {
   resultBadge.textContent = normalized;
   resultBadge.classList.toggle("fail", normalized === "FAIL");
   resultBadge.classList.toggle("running", normalized !== "PASS" && normalized !== "FAIL");
+}
+
+function cloneTreeStructure(tree) {
+  return (Array.isArray(tree) ? tree : []).map((item) => ({
+    scene: item.scene,
+    tests: { ...(item.tests || {}) }
+  }));
+}
+
+function syncVisibleTcTree(tree) {
+  const nextTree = cloneTreeStructure(
+    Array.isArray(tree) && tree.length ? tree : defaultItsTestStructure
+  );
+  const nextSignature = JSON.stringify(nextTree);
+  if (nextSignature === currentTreeSignature) {
+    applyCurrentTcFocus({ scroll: false, behavior: "auto" });
+    return;
+  }
+
+  itsTestStructure = nextTree;
+  currentTreeSignature = nextSignature;
+  renderTcTree();
+  applyCurrentTcFocus({ scroll: false, behavior: "auto" });
+}
+
+function getRunId(run) {
+  return run?.id || run?.name || "";
+}
+
+function renderRunTabs() {
+  if (!runTabsContainer) {
+    return;
+  }
+
+  runTabsContainer.innerHTML = "";
+  const visibleRuns = runTabs.length
+    ? runTabs
+    : [{ id: "waiting", name: "CameraITS_*", active: true }];
+
+  visibleRuns.forEach((run) => {
+    const runId = getRunId(run);
+    const tabButton = document.createElement("button");
+    tabButton.type = "button";
+    tabButton.className = "run-tab";
+    tabButton.textContent = run.name || runId || "CameraITS_*";
+    tabButton.title = run.path || tabButton.textContent;
+    tabButton.dataset.runId = runId;
+    tabButton.classList.toggle("active", runId === selectedRunId || (!selectedRunId && run.active));
+    tabButton.classList.toggle("running", Boolean(run.active));
+    tabButton.setAttribute("aria-pressed", tabButton.classList.contains("active") ? "true" : "false");
+    tabButton.addEventListener("click", () => {
+      selectedRunId = runId;
+      const nextCameras = runCameras[selectedRunId] || [];
+      selectedCameraId = runActiveCameraIds[selectedRunId] || nextCameras[0]?.id || "";
+      if (latestDashboardData) {
+        applyCameraState(latestDashboardData, { followActive: false });
+        applySelectedCameraData({ data: latestDashboardData, scrollFocusedTc: true });
+      }
+    });
+    runTabsContainer.appendChild(tabButton);
+  });
+}
+
+function applySelectedRunBadge() {
+  if (!runNameBadge) {
+    return;
+  }
+
+  const selectedRun = runTabs.find((run) => getRunId(run) === selectedRunId);
+  const runName = selectedRun?.name || "CameraITS_*";
+  runNameBadge.textContent = runName;
+  runNameBadge.title = selectedRun?.path || runName;
+  runNameBadge.classList.toggle("waiting", !selectedRun);
+}
+
+function applyRunState(data) {
+  runTabs = Array.isArray(data.runs) ? data.runs : [];
+  runCameras = data.runCameras || {};
+  runCameraTrees = data.runCameraTrees || {};
+  runActiveCameraIds = data.runActiveCameraIds || {};
+
+  activeRunId = getRunId(runTabs.find((run) => run.active));
+
+  if (!selectedRunId || !runTabs.some((run) => getRunId(run) === selectedRunId)) {
+    selectedRunId = activeRunId || getRunId(runTabs[0]) || "";
+  }
+
+  selectedRunIsActive = Boolean(activeRunId && selectedRunId === activeRunId);
+  renderRunTabs();
+  applySelectedRunBadge();
 }
 
 function applyItsData(data) {
@@ -594,17 +695,24 @@ function renderCameraTabs() {
 }
 
 function applyCameraState(data, { followActive = false } = {}) {
-  const nextCameraList = Array.isArray(data.cameras) ? data.cameras : [];
+  applyRunState(data);
+
+  const selectedRunCameras = runCameras[selectedRunId];
+  const nextCameraList = Array.isArray(selectedRunCameras)
+    ? selectedRunCameras
+    : (Array.isArray(data.cameras) ? data.cameras : []);
   const nextCameraIds = getCameraIdList(nextCameraList);
   const newCameraIds = nextCameraIds.filter((cameraId) => !knownCameraIds.includes(cameraId));
-  const activeCameraId = data.activeExecution?.cameraId || data.capture?.cameraId || data.activeCameraId || "";
+  const activeCameraId = selectedRunIsActive
+    ? (data.activeExecution?.cameraId || data.capture?.cameraId || data.activeCameraId || "")
+    : (runActiveCameraIds[selectedRunId] || nextCameraIds[0] || "");
 
   cameraList = nextCameraList;
   knownCameraIds = nextCameraIds;
-  cameraTrees = data.cameraTrees || {};
-  cameraAnalyses = data.cameraAnalysis || {};
-  cameraCaptures = data.cameraCaptures || {};
-  cameraActiveExecutions = data.cameraActiveExecutions || {};
+  cameraTrees = runCameraTrees[selectedRunId] || data.cameraTrees || {};
+  cameraAnalyses = selectedRunIsActive ? (data.cameraAnalysis || {}) : {};
+  cameraCaptures = selectedRunIsActive ? (data.cameraCaptures || {}) : {};
+  cameraActiveExecutions = selectedRunIsActive ? (data.cameraActiveExecutions || {}) : {};
 
   if (!selectedCameraId || !nextCameraIds.includes(selectedCameraId)) {
     selectedCameraId = activeCameraId || nextCameraIds[0] || "";
@@ -616,7 +724,7 @@ function applyCameraState(data, { followActive = false } = {}) {
       : newCameraIds[newCameraIds.length - 1];
   }
 
-  if (followActive && activeCameraId && nextCameraIds.includes(activeCameraId)) {
+  if (selectedRunIsActive && followActive && activeCameraId && nextCameraIds.includes(activeCameraId)) {
     selectedCameraId = activeCameraId;
   }
 
@@ -626,6 +734,10 @@ function applyCameraState(data, { followActive = false } = {}) {
 function getSelectedTree(data) {
   if (selectedCameraId && cameraTrees[selectedCameraId]) {
     return cameraTrees[selectedCameraId];
+  }
+  const runTrees = runCameraTrees[selectedRunId] || {};
+  if (selectedCameraId && runTrees[selectedCameraId]) {
+    return runTrees[selectedCameraId];
   }
   return Array.isArray(data.tree) ? data.tree : itsTestStructure;
 }
@@ -664,6 +776,12 @@ function getSelectedActiveExecution(data) {
 
 function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
   const selectedTree = getSelectedTree(data);
+  syncVisibleTcTree(selectedTree);
+
+  if (!selectedRunIsActive) {
+    return;
+  }
+
   const selectedCapture = getSelectedCapture(data);
   const selectedActiveExecution = getSelectedActiveExecution(data);
 
@@ -1464,6 +1582,7 @@ async function showTcCaptureTab(
 //document.addEventListener("DOMContentLoaded", renderTcTree);
 
 function applyDashboardData(data, { scrollFocusedTc = false, followActiveCamera = false } = {}) {
+  latestDashboardData = data;
   applyRunInfo(data.run);
   applyCameraState(data, { followActive: followActiveCamera });
 
@@ -1681,7 +1800,7 @@ async function startLogSimulation() {
         }
 
         // TC sync
-        if (rawText.includes("Test results:")) {
+        if (selectedRunIsActive && rawText.includes("Test results:")) {
 
             const nextTcUpdate =
                 pendingTcUpdates.shift();

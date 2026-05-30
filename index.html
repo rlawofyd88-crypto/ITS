@@ -10,12 +10,19 @@
     <main class="demo-shell">
       <header class="topbar">
         <section class="brand-heading">
-          <div class="brand-card" aria-label="Brycen Korea">
-            <img src="./assets/brycen-logo.png" alt="브라이센코리아" />
+          <div class="brand-logo-row">
+            <div class="google-brand-card" aria-label="Google">
+              <span class="google-wordmark" aria-hidden="true">
+                <span class="google-blue">G</span><span class="google-red">o</span><span class="google-yellow">o</span><span class="google-blue">g</span><span class="google-green">l</span><span class="google-red">e</span>
+              </span>
+            </div>
+            <div class="brand-card brycen-card" aria-label="Brycen Korea">
+              <img src="./assets/brycen-logo.png" alt="브라이센코리아" />
+            </div>
           </div>
           <div>
             <p class="eyebrow">COEX LIVE DEMO</p>
-            <h1>Android ITS Box Visual Inspection</h1>
+            <h1>Google Android ITS Box Visual Inspection</h1>
           </div>
         </section>
         <section class="status-strip" aria-label="demo status">
@@ -36,7 +43,6 @@
               <h2>ITS Test Case List</h2>
               <div class="camera-tabs" id="cameraTabs" aria-label="Camera ID tabs"></div>
             </div>
-            <span class="file-badge run-badge" id="runNameBadge" title="CameraITS run">CameraITS_*</span>
           </div>
 
           <div class="panel-content-split">
@@ -47,6 +53,11 @@
             </div>
           </div>
         </article>
+        <section class="run-tabs-panel" aria-label="CameraITS result runs">
+          <div class="run-tabs" id="runTabs">
+            <button class="run-tab active" type="button">CameraITS_*</button>
+          </div>
+        </section>
         <article class="panel analytics-panel">
           <div class="panel-heading">
             <div>

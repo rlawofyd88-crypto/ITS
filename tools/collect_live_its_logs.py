@@ -194,6 +194,8 @@ class LiveLogCollector:
 
       for line in new_text.replace("\r", "").split("\n"):
         stripped = line.strip()
+        if "[aaudio.hw_burst_min_usec]" in stripped:
+                continue
         if stripped:
           self.append_line(log_path.name, stripped)
 

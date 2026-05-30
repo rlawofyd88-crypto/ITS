@@ -125,6 +125,7 @@ class ITSMonitor:
         self.fixed_log_context: Dict[str, str] = {}
         self.active_execution: Dict[str, Any] | None = None
         self.active_executions_by_camera: Dict[str, Dict[str, Any]] = {}
+        self.static_run_results_cache: Dict[str, tuple[float, Dict[str, Dict[str, Dict[str, int]]]]] = {}
 
     def status_value(self, status: str) -> int:
         normalized = status.upper()
@@ -266,6 +267,55 @@ class ITSMonitor:
                 continue
         return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
+    def get_run_dir_from_path(self, path_text: str | None) -> Path | None:
+        if not path_text:
+            return None
+        path = Path(path_text)
+        for candidate in (path, *path.parents):
+            if candidate.name.startswith("CameraITS_"):
+                return candidate
+        return None
+
+    def get_recent_runs(self, limit: int = 5) -> List[Dict[str, Any]]:
+        if self.root_dir.is_dir() and self.root_dir.name.startswith("CameraITS_"):
+            candidates = [self.root_dir]
+        else:
+            candidates = [
+                path
+                for path in self.root_dir.glob("CameraITS_*")
+                if path.is_dir()
+            ]
+
+        active_dir = self.get_run_dir_from_path(
+            (self.active_execution or {}).get("sourceDir")
+        )
+        if active_dir and active_dir not in candidates and active_dir.is_dir():
+            candidates.append(active_dir)
+
+        sorted_runs = sorted(
+            candidates,
+            key=self.path_mtime,
+            reverse=True,
+        )
+        ordered_runs = []
+        if active_dir:
+            for path in sorted_runs:
+                if path == active_dir:
+                    ordered_runs.append(path)
+                    break
+        ordered_runs.extend(path for path in sorted_runs if path not in ordered_runs)
+
+        return [
+            {
+                "id": path.name,
+                "name": path.name,
+                "path": str(path),
+                "active": bool(active_dir and path == active_dir),
+                "updatedAt": self.path_mtime(path),
+            }
+            for path in ordered_runs[:limit]
+        ]
+
     def get_camera_id_from_path(self, path: Path, its_dir: Path) -> str:
         try:
             path_parts = path.relative_to(its_dir).parts
@@ -291,6 +341,20 @@ class ITSMonitor:
             if self.current_event:
                 camera_ids.add(self.current_event.get("cameraId", DEFAULT_CAMERA_ID))
 
+        return sorted(camera_ids, key=self.camera_sort_key)
+
+    def get_camera_ids_from_results(
+        self,
+        its_dir: Path | None,
+        results: Dict[str, Dict[str, Dict[str, int]]] | None = None,
+    ) -> List[str]:
+        camera_ids = set()
+        if its_dir and its_dir.is_dir():
+            for path in its_dir.glob("cam_id_*"):
+                if path.is_dir():
+                    camera_ids.add(path.name)
+        if results:
+            camera_ids.update(results.keys())
         return sorted(camera_ids, key=self.camera_sort_key)
 
     def camel_to_snake(self, value: str) -> str:
@@ -498,6 +562,8 @@ class ITSMonitor:
 
         for line in new_text.replace("\r", "").split("\n"):
             stripped = line.strip()
+            if "[aaudio.hw_burst_min_usec]" in stripped:
+                continue
             if not stripped:
                 continue
 
@@ -583,6 +649,8 @@ class ITSMonitor:
 
         for line in new_text.replace("\r", "").split("\n"):
             stripped = line.strip()
+            if "[aaudio.hw_burst_min_usec]" in stripped:
+                continue
             if not stripped:
                 continue
 
@@ -657,6 +725,8 @@ class ITSMonitor:
 
         for line in new_text.replace("\r", "").split("\n"):
             stripped = line.strip()
+            if "[aaudio.hw_burst_min_usec]" in stripped:
+                continue
             if stripped:
                 self.append_log_entry(camera_id, scene_name, test_name, stripped, "LIVE_LOG")
 
@@ -688,6 +758,8 @@ class ITSMonitor:
 
         for line in new_text.replace("\r", "").split("\n"):
             stripped = line.strip()
+            if "[aaudio.hw_burst_min_usec]" in stripped:
+                continue
             if not stripped:
                 continue
             prefix_match = LIVE_LOG_PREFIX_RE.match(stripped)
@@ -938,6 +1010,34 @@ class ITSMonitor:
 
         return sorted(events.values(), key=self.result_sort_key)
 
+    def build_results_from_events(
+        self,
+        events: List[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Dict[str, int]]]:
+        results: Dict[str, Dict[str, Dict[str, int]]] = {}
+        for event in events:
+            camera_id = event.get("cameraId", DEFAULT_CAMERA_ID)
+            results.setdefault(camera_id, {}).setdefault(event["scene"], {})[
+                event["test"]
+            ] = event["status"]
+        return results
+
+    def get_static_tc_results(
+        self,
+        its_dir: Path,
+    ) -> Dict[str, Dict[str, Dict[str, int]]]:
+        cache_key = str(its_dir)
+        cache_mtime = self.path_mtime(its_dir)
+        cached = self.static_run_results_cache.get(cache_key)
+        if cached and cached[0] == cache_mtime:
+            return cached[1]
+
+        results = self.build_results_from_events(
+            self.discover_tc_result_events(its_dir)
+        )
+        self.static_run_results_cache[cache_key] = (cache_mtime, results)
+        return results
+
     def publish_event(self, event: Dict[str, Any]) -> None:
         self.replay_sequence += 1
         published_event = dict(event)
@@ -1174,6 +1274,32 @@ class ItsHandler(BaseHTTPRequestHandler):
                 camera_id: self.monitor.get_active_execution(camera_id)
                 for camera_id in camera_ids
             }
+            runs = self.monitor.get_recent_runs(limit=5)
+            run_camera_trees = {}
+            run_cameras = {}
+            run_active_camera_ids = {}
+            for run in runs:
+                run_dir = Path(run["path"])
+                is_active_run = bool(run.get("active"))
+                run_results = file_results if is_active_run else self.monitor.get_static_tc_results(run_dir)
+                run_camera_ids = self.monitor.get_camera_ids_from_results(run_dir, run_results)
+                if is_active_run:
+                    run_active_camera_id = active_camera_id
+                else:
+                    run_active_camera_id = run_camera_ids[0] if run_camera_ids else ""
+
+                run_cameras[run["id"]] = [
+                    {"id": camera_id, "label": camera_id}
+                    for camera_id in run_camera_ids
+                ]
+                run_active_camera_ids[run["id"]] = run_active_camera_id
+                run_camera_trees[run["id"]] = {
+                    camera_id: self.monitor.get_updated_structure(
+                        run_results.get(camera_id, {}),
+                        self.monitor.get_active_execution(camera_id) if is_active_run else None,
+                    )
+                    for camera_id in run_camera_ids
+                }
             active_results = file_results.get(active_camera_id, {}) if active_camera_id else {}
             # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
             response_data = {
@@ -1188,6 +1314,10 @@ class ItsHandler(BaseHTTPRequestHandler):
                 "cameraAnalysis": camera_analysis,
                 "cameraCaptures": camera_captures,
                 "cameraActiveExecutions": camera_active_executions,
+                "runs": runs,
+                "runCameras": run_cameras,
+                "runCameraTrees": run_camera_trees,
+                "runActiveCameraIds": run_active_camera_ids,
                 "run": {
                     "name": latest_dir.name if latest_dir else "",
                     "path": str(latest_dir) if latest_dir else "",
