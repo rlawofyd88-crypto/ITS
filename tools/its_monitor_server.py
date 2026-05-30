@@ -4,6 +4,7 @@
 import argparse
 import configparser
 import json
+import os
 import time
 import re
 import mimetypes
@@ -86,6 +87,7 @@ RUN_ALL_TESTS_LIVE_LOG = "run_all_tests_live.log"
 LIVE_MOBLY_LOG_CANDIDATES = ("test_log.DEBUG", "test_log.INFO")
 FIXED_LIVE_LOG_PREFIX = "its_live"
 FIXED_LIVE_LOG_DIRNAME = "its_live"
+LIVE_STATE_NAME = "current_run.json"
 FIXED_LIVE_LOG_CANDIDATES = (
     f"{FIXED_LIVE_LOG_PREFIX}.DEBUG",
     f"{FIXED_LIVE_LOG_PREFIX}.INFO",
@@ -276,6 +278,61 @@ class ITSMonitor:
                 return candidate
         return None
 
+    def get_live_state_path(self) -> Path:
+        override_path = os.environ.get("ITS_LIVE_STATE_PATH")
+        if override_path:
+            return Path(override_path)
+
+        root = self.root_dir.parent if self.root_dir.name.startswith("CameraITS_") else self.root_dir
+        return root / FIXED_LIVE_LOG_DIRNAME / LIVE_STATE_NAME
+
+    def read_live_state(self) -> Dict[str, Any] | None:
+        state_path = self.get_live_state_path()
+        if not state_path.is_file():
+            return None
+
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+        return payload if isinstance(payload, dict) else None
+
+    def get_active_run_dir_from_state(self, live_state: Dict[str, Any] | None) -> Path | None:
+        if not live_state or live_state.get("state") != "running":
+            return None
+
+        run_dir = self.get_run_dir_from_path(live_state.get("runPath"))
+        return run_dir if run_dir and run_dir.is_dir() else None
+
+    def clear_all_active_executions(self) -> None:
+        self.active_execution = None
+        self.active_executions_by_camera = {}
+
+    def apply_live_state(self) -> Dict[str, Any] | None:
+        live_state = self.read_live_state()
+        if not live_state:
+            return None
+
+        if live_state.get("state") != "running":
+            self.clear_all_active_executions()
+            return live_state
+
+        camera_id = live_state.get("cameraId") or DEFAULT_CAMERA_ID
+        scene_name = live_state.get("scene") or ""
+        test_name = live_state.get("test") or ""
+        if scene_name and test_name:
+            artifact_dir = Path(
+                live_state.get("outputPath")
+                or live_state.get("runPath")
+                or ""
+            )
+            self.set_active_execution(camera_id, scene_name, test_name, artifact_dir)
+        else:
+            self.clear_all_active_executions()
+
+        return live_state
+
     def get_recent_runs(self, limit: int = 5) -> List[Dict[str, Any]]:
         if self.root_dir.is_dir() and self.root_dir.name.startswith("CameraITS_"):
             candidates = [self.root_dir]
@@ -286,9 +343,11 @@ class ITSMonitor:
                 if path.is_dir()
             ]
 
-        active_dir = self.get_run_dir_from_path(
-            (self.active_execution or {}).get("sourceDir")
-        )
+        active_dir = self.get_active_run_dir_from_state(self.read_live_state())
+        if not active_dir:
+            active_dir = self.get_run_dir_from_path(
+                (self.active_execution or {}).get("sourceDir")
+            )
         if active_dir and active_dir not in candidates and active_dir.is_dir():
             candidates.append(active_dir)
 
@@ -1089,7 +1148,12 @@ class ITSMonitor:
 
     def get_released_log_data(self, since_sequence: int = 0) -> List[Dict[str, Any]]:
         with self.replay_lock:
-            self.collect_live_log_updates(self.get_latest_dir())
+            live_state = self.apply_live_state()
+            self.collect_live_log_updates(
+                self.get_active_run_dir_from_state(live_state)
+                or self.get_latest_dir()
+            )
+            self.apply_live_state()
 
             if since_sequence > self.log_sequence:
                 since_sequence = 0
@@ -1249,9 +1313,14 @@ class ItsHandler(BaseHTTPRequestHandler):
         request_path = parsed_url.path
 
         if request_path == "/its-status.json":
-            latest_dir = self.monitor.get_latest_dir()
+            live_state = self.monitor.apply_live_state()
+            latest_dir = (
+                self.monitor.get_active_run_dir_from_state(live_state)
+                or self.monitor.get_latest_dir()
+            )
             file_results = self.monitor.parse_tc_results(latest_dir) if latest_dir else {}
             self.monitor.collect_live_log_updates(latest_dir)
+            live_state = self.monitor.apply_live_state()
             camera_ids = self.monitor.get_camera_ids(latest_dir)
             active_camera_id = self.monitor.get_active_camera_id(camera_ids)
             active_execution = self.monitor.get_active_execution(active_camera_id or None)
@@ -1318,6 +1387,7 @@ class ItsHandler(BaseHTTPRequestHandler):
                 "runCameras": run_cameras,
                 "runCameraTrees": run_camera_trees,
                 "runActiveCameraIds": run_active_camera_ids,
+                "liveState": live_state,
                 "run": {
                     "name": latest_dir.name if latest_dir else "",
                     "path": str(latest_dir) if latest_dir else "",
