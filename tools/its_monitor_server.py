@@ -312,6 +312,20 @@ class ITSMonitor:
         run_key = self.fixed_live_run_key(run_dir)
         return self.fixed_live_results_by_run.get(run_key, {}) if run_key else {}
 
+    def merge_tc_results(
+        self,
+        base_results: Dict[str, Dict[str, Dict[str, int]]] | None,
+        overlay_results: Dict[str, Dict[str, Dict[str, int]]] | None,
+    ) -> Dict[str, Dict[str, Dict[str, int]]]:
+        merged: Dict[str, Dict[str, Dict[str, int]]] = {}
+        for source in (base_results or {}, overlay_results or {}):
+            for camera_id, camera_results in source.items():
+                for scene_name, scene_results in camera_results.items():
+                    merged.setdefault(camera_id, {}).setdefault(scene_name, {}).update(
+                        scene_results
+                    )
+        return merged
+
     def get_fixed_live_event(
         self,
         run_dir: Path | None,
@@ -1585,13 +1599,16 @@ class ItsHandler(BaseHTTPRequestHandler):
                 if is_active_run and live_test_running:
                     run_results = self.monitor.get_fixed_live_results(run_dir)
                 elif should_load_run_detail:
-                    run_results = self.monitor.get_fixed_live_results(run_dir)
-                    if not run_results:
-                        run_results = (
-                            file_results
-                            if latest_dir and run_dir == latest_dir
-                            else self.monitor.get_static_tc_results(run_dir)
-                        )
+                    fixed_run_results = self.monitor.get_fixed_live_results(run_dir)
+                    static_run_results = (
+                        file_results
+                        if latest_dir and run_dir == latest_dir and not live_test_running
+                        else self.monitor.get_static_tc_results(run_dir)
+                    )
+                    run_results = self.monitor.merge_tc_results(
+                        static_run_results,
+                        fixed_run_results,
+                    )
                 else:
                     run_results = {}
 
