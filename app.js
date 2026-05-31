@@ -425,6 +425,7 @@ const LOG_RESULT_PAUSE_MS = 60;
 const LOG_OUTPUT_MAX_WAIT_MS = 420;
 const LOG_OUTPUT_IDLE_SLEEP_MS = 20;
 const LOG_OUTPUT_EMPTY_DELAY_MS = 40;
+const TC_AUTO_SCROLL_GRACE_MS = 900;
 const LOG_TIMESTAMP_RE = /^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)/;
 const MAX_RUN_TABS = 5;
 const INITIAL_LIVE_LOG_TAIL = 120;
@@ -1199,6 +1200,7 @@ function applyCurrentTcFocus({ scroll = false, behavior = "smooth" } = {}) {
     const itemTop = itemRect.top - containerRect.top + treeContainer.scrollTop;
     const centeredTop = itemTop - (treeContainer.clientHeight - itemRect.height) / 2;
 
+    tcAutoScrollUntil = Date.now() + TC_AUTO_SCROLL_GRACE_MS;
     treeContainer.scrollTo({
       top: Math.max(0, centeredTop),
       behavior
@@ -1217,8 +1219,11 @@ function setCurrentTcFocus(capture, options = {}) {
 
   const changed = !isFocusedTc(sceneName, testName, cameraId);
   currentTcFocus = { cameraId, scene: sceneName, test: testName };
+  const shouldScroll = Boolean(
+    options.scroll || (selectedRunIsActive && liveSyncEnabled && changed)
+  );
   applyCurrentTcFocus({
-    scroll: Boolean(options.scroll),
+    scroll: shouldScroll,
     behavior: options.behavior || (changed ? "smooth" : "auto")
   });
   updateCurrentTestGuide();
@@ -1928,6 +1933,7 @@ let logAutoFollowRestoreTimer = null;
 
 let tcAutoFollow = true;
 let tcAutoFollowRestoreTimer = null;
+let tcAutoScrollUntil = 0;
 
 function clearLogViewer() {
     const logViewer = document.getElementById("logViewer");
@@ -2170,6 +2176,10 @@ function init() {
   
   if (tcTreeContainer) {
     tcTreeContainer.addEventListener("scroll", () => {
+      if (Date.now() < tcAutoScrollUntil) {
+        return;
+      }
+
       const distanceFromBottom =
       tcTreeContainer.scrollHeight
       - tcTreeContainer.scrollTop
