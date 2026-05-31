@@ -88,6 +88,7 @@ LIVE_MOBLY_LOG_CANDIDATES = ("test_log.DEBUG", "test_log.INFO")
 FIXED_LIVE_LOG_PREFIX = "its_live"
 FIXED_LIVE_LOG_DIRNAME = "its_live"
 LIVE_STATE_NAME = "current_run.json"
+FIXED_LIVE_INITIAL_READ_BYTES = 16 * 1024 * 1024
 FIXED_LIVE_LOG_CANDIDATES = (
     f"{FIXED_LIVE_LOG_PREFIX}.DEBUG",
     f"{FIXED_LIVE_LOG_PREFIX}.INFO",
@@ -100,9 +101,17 @@ TIMESTAMPED_TEST_DIR_RE = re.compile(
 )
 LIVE_LOG_START_RE = re.compile(
     r".*LIVE_LOG_START scene=(?P<scene>\S*) camera=(?P<camera>\S*) test=(?P<test>\S*)"
+    r"(?: output=(?P<output>\S*))?"
 )
 LIVE_LOG_END_RE = re.compile(
     r".*LIVE_LOG_END scene=(?P<scene>\S*) camera=(?P<camera>\S*) test=(?P<test>\S*)"
+    r"(?: returncode=(?P<returncode>-?\d+))?"
+)
+LIVE_LOG_ARTIFACT_RE = re.compile(
+    r'Artifacts are saved in "(?P<path>[^"]+)"'
+)
+LIVE_LOG_SUMMARY_RE = re.compile(
+    r'Test summary saved in "(?P<path>[^"]+)"'
 )
 
 class ITSMonitor:
@@ -125,6 +134,8 @@ class ITSMonitor:
         self.live_file_offsets: Dict[str, int] = {}
         self.last_emitted_log_camera_id = ""
         self.fixed_log_context: Dict[str, str] = {}
+        self.fixed_live_results_by_run: Dict[str, Dict[str, Dict[str, Dict[str, int]]]] = {}
+        self.fixed_live_events_by_run: Dict[str, Dict[tuple[str, str, str], Dict[str, Any]]] = {}
         self.active_execution: Dict[str, Any] | None = None
         self.active_executions_by_camera: Dict[str, Dict[str, Any]] = {}
         self.static_run_results_cache: Dict[str, tuple[float, Dict[str, Dict[str, Dict[str, int]]]]] = {}
@@ -292,6 +303,80 @@ class ITSMonitor:
             return candidate
         return None
 
+    def fixed_live_run_key(self, run_dir: Path | str | None) -> str:
+        if not run_dir:
+            return ""
+        return Path(run_dir).name
+
+    def get_fixed_live_results(self, run_dir: Path | None) -> Dict[str, Dict[str, Dict[str, int]]]:
+        run_key = self.fixed_live_run_key(run_dir)
+        return self.fixed_live_results_by_run.get(run_key, {}) if run_key else {}
+
+    def get_fixed_live_event(
+        self,
+        run_dir: Path | None,
+        camera_id: str,
+        scene_name: str,
+        test_name: str,
+    ) -> Dict[str, Any] | None:
+        run_key = self.fixed_live_run_key(run_dir)
+        if not run_key:
+            return None
+        normalized_test_name = self.normalize_test_name(scene_name, test_name)
+        event = self.fixed_live_events_by_run.get(run_key, {}).get(
+            (camera_id or DEFAULT_CAMERA_ID, scene_name, normalized_test_name)
+        )
+        return dict(event) if event else None
+
+    def fixed_live_status_from_returncode(self, returncode: str | None) -> int:
+        if returncode is None:
+            return 0
+        return self.status_map["PASS"] if returncode == "0" else self.status_map["FAIL"]
+
+    def remember_fixed_live_result(
+        self,
+        run_dir: Path | None,
+        camera_id: str,
+        scene_name: str,
+        test_name: str,
+        status: int,
+        artifact_dir: Path | None = None,
+        log_file: Path | None = None,
+    ) -> Dict[str, Any] | None:
+        if not run_dir or not status or not scene_name or not test_name:
+            return None
+
+        run_key = self.fixed_live_run_key(run_dir)
+        normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
+        normalized_test_name = self.normalize_test_name(scene_name, test_name)
+        if (scene_name, normalized_test_name) not in TEST_INDEX:
+            return None
+
+        self.fixed_live_results_by_run.setdefault(run_key, {}).setdefault(
+            normalized_camera_id, {}
+        ).setdefault(scene_name, {})[normalized_test_name] = status
+        self.visible_results.setdefault(normalized_camera_id, {}).setdefault(
+            scene_name, {}
+        )[normalized_test_name] = status
+
+        event = {
+            "cameraId": normalized_camera_id,
+            "cameraLabel": normalized_camera_id,
+            "scene": scene_name,
+            "test": normalized_test_name,
+            "status": status,
+            "completedAt": time.time(),
+            "sourceGroup": 0,
+            "artifactDir": str(artifact_dir) if artifact_dir else "",
+            "logFile": str(log_file) if log_file else "",
+        }
+        event_key = (normalized_camera_id, scene_name, normalized_test_name)
+        self.fixed_live_events_by_run.setdefault(run_key, {})[event_key] = event
+        self.current_event = event
+        self.current_events_by_camera[normalized_camera_id] = event
+        self.published_events.append(event)
+        return event
+
     def get_live_state_path(self) -> Path:
         override_path = os.environ.get("ITS_LIVE_STATE_PATH")
         if override_path:
@@ -420,6 +505,9 @@ class ITSMonitor:
             camera_ids.update(self.visible_results.keys())
             camera_ids.update(event.get("cameraId", DEFAULT_CAMERA_ID) for event in self.pending_results)
             camera_ids.update(event.get("cameraId", DEFAULT_CAMERA_ID) for event in self.published_events)
+            camera_ids.update(self.active_executions_by_camera.keys())
+            if self.active_execution:
+                camera_ids.add(self.active_execution.get("cameraId", DEFAULT_CAMERA_ID))
             if self.current_event:
                 camera_ids.add(self.current_event.get("cameraId", DEFAULT_CAMERA_ID))
 
@@ -636,7 +724,14 @@ class ITSMonitor:
 
         try:
             with log_path.open("r", encoding="utf-8", errors="ignore") as file:
-                file.seek(previous_offset)
+                if (
+                    previous_offset == 0
+                    and stat_result.st_size > FIXED_LIVE_INITIAL_READ_BYTES
+                ):
+                    file.seek(stat_result.st_size - FIXED_LIVE_INITIAL_READ_BYTES)
+                    file.readline()
+                else:
+                    file.seek(previous_offset)
                 new_text = file.read()
                 self.live_file_offsets[path_key] = file.tell()
         except OSError:
@@ -738,10 +833,16 @@ class ITSMonitor:
 
             start_match = LIVE_LOG_START_RE.match(stripped)
             if start_match:
+                output_path = start_match.group("output") or ""
+                run_dir = self.get_run_dir_from_path(output_path)
                 self.fixed_log_context = {
                     "cameraId": start_match.group("camera") or DEFAULT_CAMERA_ID,
                     "scene": start_match.group("scene") or "",
                     "test": start_match.group("test") or "",
+                    "outputPath": output_path,
+                    "runPath": str(run_dir) if run_dir else "",
+                    "artifactDir": "",
+                    "logFile": "",
                 }
                 self.set_active_execution(
                     self.fixed_log_context["cameraId"],
@@ -766,6 +867,24 @@ class ITSMonitor:
                     "scene", "")
                 test_name = end_match.group("test") or self.fixed_log_context.get(
                     "test", "")
+                run_dir = self.get_run_dir_from_path(
+                    self.fixed_log_context.get("runPath")
+                    or self.fixed_log_context.get("outputPath")
+                )
+                artifact_dir = Path(self.fixed_log_context["artifactDir"]) if self.fixed_log_context.get("artifactDir") else None
+                log_file = Path(self.fixed_log_context["logFile"]) if self.fixed_log_context.get("logFile") else None
+                status = self.fixed_live_status_from_returncode(
+                    end_match.group("returncode")
+                )
+                self.remember_fixed_live_result(
+                    run_dir,
+                    camera_id,
+                    scene_name,
+                    test_name,
+                    status,
+                    artifact_dir=artifact_dir,
+                    log_file=log_file,
+                )
                 self.append_log_entry(
                     camera_id, scene_name, test_name, stripped, "LIVE_LOG")
                 self.clear_active_execution(camera_id, scene_name, test_name)
@@ -775,6 +894,19 @@ class ITSMonitor:
             camera_id = self.fixed_log_context.get("cameraId", DEFAULT_CAMERA_ID)
             scene_name = self.fixed_log_context.get("scene", "")
             test_name = self.fixed_log_context.get("test", "")
+            artifact_match = LIVE_LOG_ARTIFACT_RE.search(stripped)
+            if artifact_match:
+                self.fixed_log_context["artifactDir"] = artifact_match.group("path")
+                candidate_log = Path(artifact_match.group("path")) / "test_log.DEBUG"
+                if candidate_log.is_file():
+                    self.fixed_log_context["logFile"] = str(candidate_log)
+            summary_match = LIVE_LOG_SUMMARY_RE.search(stripped)
+            if summary_match:
+                summary_path = Path(summary_match.group("path"))
+                self.fixed_log_context["artifactDir"] = str(summary_path.parent)
+                candidate_log = summary_path.parent / "test_log.DEBUG"
+                if candidate_log.is_file():
+                    self.fixed_log_context["logFile"] = str(candidate_log)
             self.append_log_entry(
                 camera_id, scene_name, test_name, stripped, "LIVE_LOG")
 
@@ -856,6 +988,9 @@ class ITSMonitor:
             return
 
         found_fixed_live_logs = self.collect_fixed_live_logs(its_dir)
+        if found_fixed_live_logs:
+            return
+
         found_live_mobly_logs = self.collect_live_mobly_logs(its_dir)
         live_stdout_files = []
         for log_path in its_dir.rglob(f"*{LIVE_STDOUT_SUFFIX}"):
@@ -1127,6 +1262,15 @@ class ITSMonitor:
         scene_name: str,
         test_name: str,
     ) -> Dict[str, Any] | None:
+        fixed_event = self.get_fixed_live_event(
+            its_dir,
+            camera_id,
+            scene_name,
+            test_name,
+        )
+        if fixed_event:
+            return fixed_event
+
         normalized_test_name = self.normalize_test_name(scene_name, test_name)
         for event in reversed(self.discover_tc_result_events(its_dir)):
             if (
@@ -1356,6 +1500,10 @@ class ItsHandler(BaseHTTPRequestHandler):
         request_path = parsed_url.path
 
         if request_path == "/its-status.json":
+            query = parse_qs(parsed_url.query)
+            selected_run_id = query.get("selectedRun", [""])[0]
+            include_selected_run = query.get("includeSelectedRun", ["0"])[0] == "1"
+            light_live_status = query.get("lightLive", ["0"])[0] == "1"
             live_state = self.monitor.apply_live_state()
             live_test_running = self.monitor.is_live_test_running(live_state)
             latest_dir = (
@@ -1363,10 +1511,17 @@ class ItsHandler(BaseHTTPRequestHandler):
                 or self.monitor.get_latest_dir()
             )
             if latest_dir and live_test_running:
+                self.monitor.collect_fixed_live_logs(latest_dir)
+
+            if latest_dir and live_test_running and not light_live_status:
                 file_results = self.monitor.parse_tc_results(latest_dir)
                 self.monitor.collect_live_log_updates(latest_dir)
             else:
-                file_results = self.monitor.get_static_tc_results(latest_dir) if latest_dir else {}
+                file_results = (
+                    self.monitor.get_static_tc_results(latest_dir)
+                    if latest_dir and not live_test_running
+                    else self.monitor.get_fixed_live_results(latest_dir)
+                )
             live_state = self.monitor.apply_live_state()
             live_test_running = self.monitor.is_live_test_running(live_state)
             camera_ids = self.monitor.get_camera_ids(latest_dir)
@@ -1401,16 +1556,47 @@ class ItsHandler(BaseHTTPRequestHandler):
             }
             runs = self.monitor.get_recent_runs(limit=5)
             run_camera_trees = {}
+            run_camera_analysis = {}
             run_cameras = {}
             run_active_camera_ids = {}
+            active_run_id = next(
+                (run["id"] for run in runs if run.get("active")),
+                "",
+            )
+            run_ids = {run["id"] for run in runs}
+            if (not selected_run_id or selected_run_id not in run_ids) and runs:
+                selected_run_id = active_run_id or runs[0]["id"]
+
             for run in runs:
                 run_dir = Path(run["path"])
                 is_active_run = bool(run.get("active"))
-                run_results = (
-                    file_results
-                    if is_active_run and live_test_running
-                    else self.monitor.get_static_tc_results(run_dir)
+                is_selected_run = run["id"] == selected_run_id
+                should_load_run_detail = (
+                    is_active_run
+                    or (
+                        is_selected_run
+                        and (
+                            not live_test_running
+                            or include_selected_run
+                        )
+                    )
                 )
+
+                if is_active_run and live_test_running and light_live_status:
+                    run_results = self.monitor.get_fixed_live_results(run_dir)
+                elif is_active_run and live_test_running:
+                    run_results = file_results
+                elif should_load_run_detail:
+                    run_results = self.monitor.get_fixed_live_results(run_dir)
+                    if not run_results:
+                        run_results = (
+                            file_results
+                            if latest_dir and run_dir == latest_dir
+                            else self.monitor.get_static_tc_results(run_dir)
+                        )
+                else:
+                    run_results = {}
+
                 run_camera_ids = self.monitor.get_camera_ids_from_results(run_dir, run_results)
                 if is_active_run:
                     run_active_camera_id = active_camera_id
@@ -1430,6 +1616,14 @@ class ItsHandler(BaseHTTPRequestHandler):
                         else None,
                     )
                     for camera_id in run_camera_ids
+                    if should_load_run_detail
+                }
+                run_camera_analysis[run["id"]] = {
+                    camera_id: self.monitor.generate_analysis_data(
+                        run_results.get(camera_id, {})
+                    )
+                    for camera_id in run_camera_ids
+                    if should_load_run_detail
                 }
             active_results = file_results.get(active_camera_id, {}) if active_camera_id else {}
             # [통합 응답 패키징] 트리 배열과 시각화 지표를 동시에 전달합니다.
@@ -1448,6 +1642,7 @@ class ItsHandler(BaseHTTPRequestHandler):
                 "runs": runs,
                 "runCameras": run_cameras,
                 "runCameraTrees": run_camera_trees,
+                "runCameraAnalysis": run_camera_analysis,
                 "runActiveCameraIds": run_active_camera_ids,
                 "liveState": live_state,
                 "run": {
@@ -1638,8 +1833,14 @@ class ItsHandler(BaseHTTPRequestHandler):
                     since_sequence = int(query.get("since", ["0"])[0])
                 except (TypeError, ValueError):
                     since_sequence = 0
+                try:
+                    tail_count = int(query.get("tail", ["0"])[0])
+                except (TypeError, ValueError):
+                    tail_count = 0
 
                 log_data = self.monitor.get_released_log_data(since_sequence)
+                if tail_count > 0 and since_sequence <= 0:
+                    log_data = log_data[-tail_count:]
                 payload = json.dumps(log_data).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

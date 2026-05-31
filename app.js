@@ -426,6 +426,7 @@ const LOG_OUTPUT_IDLE_SLEEP_MS = 20;
 const LOG_OUTPUT_EMPTY_DELAY_MS = 40;
 const LOG_TIMESTAMP_RE = /^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)/;
 const MAX_RUN_TABS = 5;
+const INITIAL_LIVE_LOG_TAIL = 120;
 let liveFeedObjectUrl = null;
 let currentCaptureKey = "";
 let lastAppliedCaptureSequence = 0;
@@ -446,12 +447,14 @@ let latestDashboardData = null;
 let runTabs = [];
 let runCameras = {};
 let runCameraTrees = {};
+let runCameraAnalyses = {};
 let runActiveCameraIds = {};
 let selectedRunId = "";
 let activeRunId = "";
 let selectedRunIsActive = true;
 let liveSyncEnabled = null;
 let liveRunAvailable = false;
+let userSelectedRun = false;
 let currentTreeSignature = "";
 
 function getLogLevel(text) {
@@ -599,6 +602,7 @@ function renderRunTabs() {
     tabButton.setAttribute("aria-pressed", tabButton.classList.contains("active") ? "true" : "false");
     tabButton.addEventListener("click", () => {
       selectedRunId = runId;
+      userSelectedRun = true;
       const nextCameras = runCameras[selectedRunId] || [];
       selectedCameraId = runActiveCameraIds[selectedRunId] || nextCameras[0]?.id || "";
       if (latestDashboardData) {
@@ -606,6 +610,7 @@ function renderRunTabs() {
         setLiveSyncEnabled(isLiveSyncData(latestDashboardData));
         applySelectedCameraData({ data: latestDashboardData, scrollFocusedTc: true });
       }
+      updateStatus();
     });
     runTabsContainer.appendChild(tabButton);
   });
@@ -628,6 +633,7 @@ function applyRunState(data) {
   runTabs = Array.isArray(data.runs) ? data.runs : [];
   runCameras = data.runCameras || {};
   runCameraTrees = data.runCameraTrees || {};
+  runCameraAnalyses = data.runCameraAnalysis || {};
   runActiveCameraIds = data.runActiveCameraIds || {};
 
   liveRunAvailable = Boolean(
@@ -639,8 +645,10 @@ function applyRunState(data) {
 
   if (liveRunAvailable && activeRunId && activeRunId !== previousActiveRunId) {
     selectedRunId = activeRunId;
+    userSelectedRun = false;
   } else if (!selectedRunId || !runTabs.some((run) => getRunId(run) === selectedRunId)) {
     selectedRunId = activeRunId || getRunId(runTabs[0]) || "";
+    userSelectedRun = false;
   }
 
   selectedRunIsActive = Boolean(activeRunId && selectedRunId === activeRunId);
@@ -778,7 +786,8 @@ function applyCameraState(data, { followActive = false } = {}) {
   cameraList = nextCameraList;
   knownCameraIds = nextCameraIds;
   cameraTrees = runCameraTrees[selectedRunId] || data.cameraTrees || {};
-  cameraAnalyses = selectedRunIsActive ? (data.cameraAnalysis || {}) : {};
+  cameraAnalyses = runCameraAnalyses[selectedRunId]
+    || (selectedRunIsActive ? (data.cameraAnalysis || {}) : {});
   cameraCaptures = selectedRunIsActive ? (data.cameraCaptures || {}) : {};
   cameraActiveExecutions = selectedRunIsActive ? (data.cameraActiveExecutions || {}) : {};
 
@@ -814,7 +823,7 @@ function getSelectedAnalysis(data) {
   if (selectedCameraId && cameraAnalyses[selectedCameraId]) {
     return cameraAnalyses[selectedCameraId];
   }
-  return data.analysis || null;
+  return selectedRunIsActive ? (data.analysis || null) : null;
 }
 
 function getSelectedCapture(data) {
@@ -845,6 +854,11 @@ function getSelectedActiveExecution(data) {
 function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
   const selectedTree = getSelectedTree(data);
   syncVisibleTcTree(selectedTree);
+
+  const selectedAnalysis = getSelectedAnalysis(data);
+  if (selectedAnalysis) {
+    applyItsData(selectedAnalysis);
+  }
 
   if (!selectedRunIsActive || !liveSyncEnabled) {
     return;
@@ -912,11 +926,6 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
           }
       }
   }
-  const selectedAnalysis = getSelectedAnalysis(data);
-  if (selectedAnalysis) {
-    applyItsData(selectedAnalysis);
-  }
-
   if (selectedCapture) {
     const captureChanged = applyCaptureInfo(selectedCapture);
     if (captureChanged) {
@@ -1444,6 +1453,18 @@ function createTcLogTab(
 }
 async function openTcLogTab(cameraId, sceneName, testName) {
     const runId = selectedRunId;
+    setCurrentTcFocus(
+        {
+            cameraId,
+            scene: sceneName,
+            test: testName
+        },
+        {
+            scroll: false,
+            behavior: "auto"
+        }
+    );
+
     try {
         const response = await fetch(
             `${monitorEndpoint}/get-tc-log`
@@ -1690,7 +1711,20 @@ async function updateStatus() {
   statusUpdateInProgress = true;
 
   try {
-    const response = await fetch(`${monitorEndpoint}/its-status.json`, { cache: "no-store" });
+    const statusParams = new URLSearchParams({ t: String(Date.now()) });
+    if (selectedRunId) {
+      statusParams.set("selectedRun", selectedRunId);
+    }
+    if (liveRunAvailable && selectedRunId && selectedRunId !== activeRunId && userSelectedRun) {
+      statusParams.set("includeSelectedRun", "1");
+    }
+    if (!userSelectedRun || (liveRunAvailable && selectedRunId === activeRunId)) {
+      statusParams.set("lightLive", "1");
+    }
+    const response = await fetch(
+      `${monitorEndpoint}/its-status.json?${statusParams.toString()}`,
+      { cache: "no-store" }
+    );
     const data = await response.json();
 
     if (data) {
@@ -1759,7 +1793,16 @@ async function fetchLiveLogs() {
     }
 
     try {
-        const response = await fetch(`${monitorEndpoint}/get-live-logs?since=${lastLogSequence}`, { cache: "no-store" });
+        const logParams = new URLSearchParams({
+            since: String(lastLogSequence)
+        });
+        if (lastLogSequence === 0) {
+            logParams.set("tail", String(INITIAL_LIVE_LOG_TAIL));
+        }
+        const response = await fetch(
+            `${monitorEndpoint}/get-live-logs?${logParams.toString()}`,
+            { cache: "no-store" }
+        );
         const logs = await response.json();
         let queuedCount = 0;
         
