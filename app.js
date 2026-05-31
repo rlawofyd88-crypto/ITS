@@ -789,12 +789,10 @@ function applyRunState(data) {
   runCameraAnalyses = data.runCameraAnalysis || {};
   runActiveCameraIds = data.runActiveCameraIds || {};
 
-  liveRunAvailable = Boolean(
-    data?.liveState?.state === "running" &&
-    data?.activeExecution?.scene &&
-    data?.activeExecution?.test
-  );
-  activeRunId = liveRunAvailable ? getRunId(runTabs.find((run) => run.active)) : "";
+  const liveStateRunning = data?.liveState?.state === "running";
+  const liveRunId = getRunId(runTabs.find((run) => run.active));
+  liveRunAvailable = Boolean(liveStateRunning && liveRunId);
+  activeRunId = liveRunAvailable ? liveRunId : "";
   resetLiveTcTreeForRun(activeRunId);
 
   if (liveRunAvailable && activeRunId && activeRunId !== previousActiveRunId) {
@@ -1035,14 +1033,14 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
     applyItsData(selectedAnalysis);
   }
 
-  if (!selectedRunIsActive || !liveSyncEnabled) {
+  if (!selectedRunIsActive) {
     return;
   }
 
   const selectedCapture = getSelectedCapture(data);
   const selectedActiveExecution = getSelectedActiveExecution(data);
 
-  if (selectedActiveExecution?.scene && selectedActiveExecution?.test) {
+  if (liveSyncEnabled && selectedActiveExecution?.scene && selectedActiveExecution?.test) {
       setCurrentTcFocus(
           {
               cameraId:
@@ -1102,7 +1100,9 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
       }
   }
 
-  const displayCapture = getDisplayCapture(selectedCapture, selectedActiveExecution);
+  const displayCapture = liveSyncEnabled
+    ? getDisplayCapture(selectedCapture, selectedActiveExecution)
+    : (selectedCapture || null);
   const captureChanged = applyCaptureInfo(displayCapture);
   if (captureChanged) {
     refreshLiveFeed();
@@ -1380,7 +1380,7 @@ async function refreshLiveFeed() {
     '.capture-panel[data-capture-tab-id="live"]'
   );
 
-  if (!liveSyncEnabled) {
+  if (!liveSyncEnabled && !liveCaptureInfo?.available) {
     return;
   }
 

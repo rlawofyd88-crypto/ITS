@@ -1206,7 +1206,7 @@ class ITSMonitor:
         return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
     def get_result_images(self, its_dir: Path | None = None) -> List[Path]:
-        search_dir = its_dir or self.get_latest_dir()
+        search_dir = self.resolve_artifact_dir(its_dir) or its_dir or self.get_latest_dir()
         if not search_dir:
             return []
 
@@ -1224,6 +1224,32 @@ class ITSMonitor:
             for _, _, image_path in sorted(candidates, key=lambda item: (item[0], item[1]))
         ]
 
+    def resolve_artifact_dir(self, artifact_dir: Path | None) -> Path | None:
+        if not artifact_dir:
+            return None
+
+        if artifact_dir.is_dir():
+            return artifact_dir
+
+        parent_dir = artifact_dir.parent
+        if not parent_dir.is_dir():
+            return None
+
+        prefix = f"{artifact_dir.name}_"
+        candidates = []
+        for candidate in parent_dir.iterdir():
+            if not candidate.is_dir() or not candidate.name.startswith(prefix):
+                continue
+            try:
+                candidates.append((candidate.stat().st_mtime, candidate))
+            except OSError:
+                continue
+
+        if not candidates:
+            return None
+
+        return max(candidates, key=lambda item: item[0])[1]
+
     def get_current_event(self, camera_id: str | None = None) -> Dict[str, Any] | None:
         with self.replay_lock:
             if camera_id:
@@ -1236,11 +1262,15 @@ class ITSMonitor:
         if not current_event:
             return None
 
-        artifact_dir = current_event.get("artifactDir")
+        artifact_dir = self.resolve_artifact_dir(
+            Path(current_event["artifactDir"])
+            if current_event.get("artifactDir")
+            else None
+        )
         if not artifact_dir:
             return None
 
-        return self.get_latest_image(Path(artifact_dir))
+        return self.get_latest_image(artifact_dir)
 
     def get_event_images(
         self,
@@ -1251,11 +1281,15 @@ class ITSMonitor:
         if not current_event:
             return []
 
-        artifact_dir = current_event.get("artifactDir")
+        artifact_dir = self.resolve_artifact_dir(
+            Path(current_event["artifactDir"])
+            if current_event.get("artifactDir")
+            else None
+        )
         if not artifact_dir:
             return []
 
-        return self.get_result_images(Path(artifact_dir))
+        return self.get_result_images(artifact_dir)
 
     def get_capture_info(self, camera_id: str | None = None) -> Dict[str, Any]:
         current_event = self.get_current_event(camera_id)
@@ -1268,7 +1302,11 @@ class ITSMonitor:
                 "message": "Waiting for a CameraITS TC result.",
             }
 
-        artifact_dir = Path(current_event["artifactDir"]) if current_event.get("artifactDir") else None
+        artifact_dir = self.resolve_artifact_dir(
+            Path(current_event["artifactDir"])
+            if current_event.get("artifactDir")
+            else None
+        )
         image_paths = self.get_event_images(current_event)
         if not image_paths:
             return {
