@@ -1164,7 +1164,7 @@ function updateCurrentTestGuide() {
   const order = tcOrderMap.get(`${sceneName}:${testName}`) || 1;
 
   currentTestScene.textContent = sceneName;
-  currentTestName.textContent = testName;
+  currentTestName.textContent = formatTcName(testName);
   currentTestOrder.textContent = `( ${order} / ${totalTcCount} )`;
   currentTestDescription.textContent = getCurrentTcDescription(sceneName, testName);
 }
