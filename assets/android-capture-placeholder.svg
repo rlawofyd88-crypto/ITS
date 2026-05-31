@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Android ITS placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07100f"/>
+      <stop offset="0.54" stop-color="#0f1d18"/>
+      <stop offset="1" stop-color="#15130c"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="42%" r="48%">
+      <stop offset="0" stop-color="#61d394" stop-opacity="0.34"/>
+      <stop offset="0.5" stop-color="#61d394" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#61d394" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="android" x1="430" y1="125" x2="850" y2="590" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9bf86f"/>
+      <stop offset="0.58" stop-color="#64d987"/>
+      <stop offset="1" stop-color="#34b773"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="16" flood-color="#61d394" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <rect width="1280" height="720" fill="url(#halo)"/>
+  <path d="M0 96h1280M0 192h1280M0 288h1280M0 384h1280M0 480h1280M0 576h1280M160 0v720M320 0v720M480 0v720M640 0v720M800 0v720M960 0v720M1120 0v720" stroke="#f6f4ef" stroke-opacity="0.045" stroke-width="2"/>
+  <g filter="url(#shadow)">
+    <path d="M535.4 157.1 492 97.1a12 12 0 0 1 19.4-14.1l45.6 62.9a214 214 0 0 1 83-16.5c29.4 0 57.5 5.9 83 16.5L768.6 83a12 12 0 0 1 19.4 14.1l-43.4 60C806.2 187 848 243.1 848 308H432c0-64.9 41.8-121 103.4-150.9Z" fill="url(#android)"/>
+    <path d="M432 333h416v148c0 52.5-42.5 95-95 95H527c-52.5 0-95-42.5-95-95V333Z" fill="url(#android)"/>
+    <rect x="372" y="346" width="48" height="176" rx="24" fill="#64d987"/>
+    <rect x="860" y="346" width="48" height="176" rx="24" fill="#64d987"/>
+    <circle cx="558" cy="238" r="22" fill="#07100f"/>
+    <circle cx="722" cy="238" r="22" fill="#07100f"/>
+    <path d="M544 576h54v42h-54v-42Zm138 0h54v42h-54v-42Z" fill="#64d987"/>
+  </g>
+  <text x="640" y="662" text-anchor="middle" fill="#f6f4ef" fill-opacity="0.9" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="800" letter-spacing="4">ANDROID ITS</text>
+  <text x="640" y="697" text-anchor="middle" fill="#aeb7b2" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="600" letter-spacing="2">NO RESULT IMAGE</text>
+</svg>

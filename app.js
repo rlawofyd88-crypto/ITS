@@ -417,6 +417,7 @@ const dataEndpoint = params.get("data");
 const monitorEndpoint = params.get("monitor") || "http://localhost:8775";
 const hasCustomLiveFeed = params.has("feed");
 const liveFeedPath = params.get("feed") || `${monitorEndpoint}/latest-capture-image`;
+const capturePlaceholderPath = params.get("placeholder") || "./assets/android-capture-placeholder.svg";
 const liveStatePath = params.get("live_state") || "./data/live-demo-state.json";
 const TC_STATUS_POLL_MS = 500;
 const LOG_POLL_MS = 500;
@@ -831,9 +832,7 @@ function setLiveSyncEnabled(enabled) {
     pendingTcUpdates = [];
     currentCaptureKey = "";
     clearLiveCaptureDisplay();
-    if (liveBadge) {
-      liveBadge.textContent = "IDLE";
-    }
+    showDefaultLiveCapture("IDLE");
   }
 }
 
@@ -994,6 +993,38 @@ function getSelectedActiveExecution(data) {
   return data.activeExecution || null;
 }
 
+function getActiveExecutionPlaceholder(activeExecution, capture = null) {
+  if (!activeExecution?.scene && !activeExecution?.test) {
+    return null;
+  }
+
+  return {
+    cameraId: activeExecution.cameraId || selectedCameraId || capture?.cameraId || "",
+    scene: activeExecution.scene || capture?.scene || "",
+    test: activeExecution.test || capture?.test || "",
+    sourceDir: activeExecution.sourceDir || activeExecution.output || activeExecution.runPath || capture?.sourceDir || "",
+    sequence: capture?.sequence || activeExecution.sequence || 0,
+    updatedAt: activeExecution.updatedAt || capture?.updatedAt || 0,
+    available: false
+  };
+}
+
+function getDisplayCapture(capture, activeExecution) {
+  if (!activeExecution?.scene) {
+    return capture || null;
+  }
+
+  if (!capture) {
+    return getActiveExecutionPlaceholder(activeExecution);
+  }
+
+  if (capture.scene && capture.scene !== activeExecution.scene) {
+    return getActiveExecutionPlaceholder(activeExecution, capture);
+  }
+
+  return capture;
+}
+
 function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
   cacheLiveTcTree(data);
   const selectedTree = getSelectedTree(data);
@@ -1070,22 +1101,26 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
           }
       }
   }
+
+  const displayCapture = getDisplayCapture(selectedCapture, selectedActiveExecution);
+  const captureChanged = applyCaptureInfo(displayCapture);
+  if (captureChanged) {
+    refreshLiveFeed();
+  }
+
   if (selectedCapture) {
-    const captureChanged = applyCaptureInfo(selectedCapture);
-    if (captureChanged) {
-      refreshLiveFeed();
-    }
-    lastAppliedCaptureSequence = Math.max(
-      lastAppliedCaptureSequence,
-      Number(selectedCapture.sequence || 0)
-    );
+      lastAppliedCaptureSequence = Math.max(
+        lastAppliedCaptureSequence,
+        Number(selectedCapture.sequence || 0)
+      );
   }
 }
 
 function applyCaptureInfo(capture) {
   if (!capture) {
+    const changed = setPlaceholderCaptureInfo({});
     liveBadge.textContent = "WAIT";
-    return false;
+    return changed;
   }
 
   const captureKey = [
@@ -1099,19 +1134,45 @@ function applyCaptureInfo(capture) {
     capture.fileName || ""
   ].join(":");
   const changed = captureKey !== currentCaptureKey;
-  currentCaptureKey = captureKey;
 
   if (!capture.available) {
+    const placeholderChanged = setPlaceholderCaptureInfo(capture);
     liveBadge.textContent = capture.test ? "NO IMG" : "WAIT";
-    return changed;
+    return placeholderChanged;
   }
 
-  liveCaptureInfo = capture;
+  currentCaptureKey = captureKey;
+  liveCaptureInfo = { ...capture, placeholder: false };
   if (changed) {
     liveCaptureStartedAt = Date.now();
     liveCaptureImageRequestKey = "";
   }
   liveBadge.textContent = "CAPTURE";
+  return changed;
+}
+
+function setPlaceholderCaptureInfo(capture = {}) {
+  const placeholderKey = [
+    "placeholder",
+    capture.sequence || 0,
+    capture.cameraId || selectedCameraId || "",
+    capture.scene || "",
+    capture.test || "",
+    capture.sourceDir || "",
+    capture.updatedAt || 0
+  ].join(":");
+  const changed = placeholderKey !== currentCaptureKey;
+  currentCaptureKey = placeholderKey;
+  liveCaptureInfo = {
+    ...capture,
+    available: true,
+    imageCount: 1,
+    placeholder: true
+  };
+  if (changed || liveCaptureImageRequestKey) {
+    liveCaptureStartedAt = Date.now();
+    liveCaptureImageRequestKey = "";
+  }
   return changed;
 }
 
@@ -1128,8 +1189,45 @@ function clearLiveCaptureDisplay() {
     liveFeedObjectUrl = null;
   }
   dutMirror?.removeAttribute("src");
+  dutMirror?.classList.remove("placeholder-capture");
   dutMirror?.classList.add("hidden");
   cameraScene?.classList.remove("has-live-feed");
+}
+
+function showLiveCapturePlaceholder() {
+  if (liveFeedObjectUrl) {
+    URL.revokeObjectURL(liveFeedObjectUrl);
+    liveFeedObjectUrl = null;
+  }
+
+  dutMirror.classList.add("placeholder-capture");
+  if (dutMirror.getAttribute("src") === capturePlaceholderPath) {
+    dutMirror.classList.remove("hidden");
+    cameraScene.classList.add("has-live-feed");
+    return;
+  }
+
+  dutMirror.onload = () => {
+    dutMirror.classList.remove("hidden");
+    cameraScene.classList.add("has-live-feed");
+  };
+  dutMirror.onerror = () => {
+    liveCaptureImageRequestKey = "";
+    dutMirror.removeAttribute("src");
+    dutMirror.classList.remove("placeholder-capture");
+    dutMirror.classList.add("hidden");
+    cameraScene.classList.remove("has-live-feed");
+  };
+  dutMirror.src = capturePlaceholderPath;
+  cameraScene.classList.add("has-live-feed");
+}
+
+function showDefaultLiveCapture(statusText = "WAIT") {
+  setPlaceholderCaptureInfo({});
+  if (liveBadge) {
+    liveBadge.textContent = statusText;
+  }
+  showLiveCapturePlaceholder();
 }
 
 function parseLogTimestamp(text) {
@@ -1271,6 +1369,9 @@ async function pollItsData() {
   } catch (error) {
     setBadge("SIM");
     externalDataActive = false;
+    if (!liveCaptureInfo || liveCaptureInfo.placeholder) {
+      showDefaultLiveCapture("WAIT");
+    }
   }
 }
 
@@ -1293,6 +1394,17 @@ async function refreshLiveFeed() {
   }
 
   try {
+    if (liveCaptureInfo.placeholder) {
+      const imageRequestKey = `${currentCaptureKey}:placeholder`;
+      if (imageRequestKey === liveCaptureImageRequestKey) {
+        showLiveCapturePlaceholder();
+        return;
+      }
+      liveCaptureImageRequestKey = imageRequestKey;
+      showLiveCapturePlaceholder();
+      return;
+    }
+
     const imageCount = Math.max(1, Number(liveCaptureInfo.imageCount || 1));
     const imageIndex = imageCount > 1
       ? Math.floor((Date.now() - liveCaptureStartedAt) / CAPTURE_IMAGE_ROTATE_MS) % imageCount
@@ -1325,6 +1437,7 @@ async function refreshLiveFeed() {
         URL.revokeObjectURL(liveFeedObjectUrl);
       }
       liveFeedObjectUrl = nextUrl;
+      dutMirror.classList.remove("placeholder-capture");
       dutMirror.classList.remove("hidden");
       cameraScene.classList.add("has-live-feed");
     };
@@ -1332,25 +1445,13 @@ async function refreshLiveFeed() {
       URL.revokeObjectURL(nextUrl);
       liveCaptureImageRequestKey = "";
       dutMirror.onload = null;
-      if (liveFeedObjectUrl) {
-        dutMirror.src = liveFeedObjectUrl;
-        dutMirror.classList.remove("hidden");
-        cameraScene.classList.add("has-live-feed");
-        return;
-      }
-      dutMirror.removeAttribute("src");
-      dutMirror.classList.add("hidden");
-      cameraScene.classList.remove("has-live-feed");
+      showLiveCapturePlaceholder();
     };
     dutMirror.src = nextUrl;
     cameraScene.classList.add("has-live-feed");
   } catch (error) {
     liveCaptureImageRequestKey = "";
-    if (!liveFeedObjectUrl) {
-      dutMirror.removeAttribute("src");
-      dutMirror.classList.add("hidden");
-      cameraScene.classList.remove("has-live-feed");
-    }
+    showLiveCapturePlaceholder();
   }
 }
 
@@ -1707,8 +1808,8 @@ function createEmptyCapturePanel() {
                 aria-label="simulated live camera feed"
             >
                 <img
-                    class="dut-mirror"
-                    src="./data/live-dut-feed.png"
+                    class="dut-mirror placeholder-capture"
+                    src="${capturePlaceholderPath}"
                     alt="No Capture Image"
                 />
 
@@ -1811,63 +1912,67 @@ async function showTcCaptureTab(
     panel.dataset.captureTabId =
         tabId;
 
-    const response = await fetch(
-        `${monitorEndpoint}/get-tc-capture`
-        + `?run=${encodeURIComponent(runId)}`
-        + `&camera=${encodeURIComponent(cameraId)}`
-        + `&scene=${encodeURIComponent(sceneName)}`
-        + `&test=${encodeURIComponent(testName)}`,
-        {
-            cache: "no-store"
-        }
-    );
+    try {
+        const response = await fetch(
+            `${monitorEndpoint}/get-tc-capture`
+            + `?run=${encodeURIComponent(runId)}`
+            + `&camera=${encodeURIComponent(cameraId)}`
+            + `&scene=${encodeURIComponent(sceneName)}`
+            + `&test=${encodeURIComponent(testName)}`,
+            {
+                cache: "no-store"
+            }
+        );
 
-    if (response.ok) {
-        const blob = await response.blob();
+        if (response.ok) {
+            const blob = await response.blob();
 
-        if (blob.size) {
-            const imageUrl = URL.createObjectURL(blob);
-                panel.dataset.objectUrl = imageUrl;
+            if (blob.size) {
+                const imageUrl = URL.createObjectURL(blob);
+                    panel.dataset.objectUrl = imageUrl;
 
-            panel.innerHTML = `
-                <div class="device-frame">
-                    <div class="scanline"></div>
+                panel.innerHTML = `
+                    <div class="device-frame">
+                        <div class="scanline"></div>
 
-                    <div class="camera-scene has-live-feed">
-                        <img
-                            class="dut-mirror"
-                            src="${imageUrl}"
-                            alt="${formatTcName(testName)}"
-                        />
+                        <div class="camera-scene has-live-feed">
+                            <img
+                                class="dut-mirror"
+                                src="${imageUrl}"
+                                alt="${formatTcName(testName)}"
+                            />
 
-                        <div class="target-card target-main">
-                            <span class="android-mark">
-                                ANDROID
-                            </span>
+                            <div class="target-card target-main">
+                                <span class="android-mark">
+                                    ANDROID
+                                </span>
 
-                            <span class="lens lens-a"></span>
-                            <span class="lens lens-b"></span>
-                            <span class="lens lens-c"></span>
-                        </div>
+                                <span class="lens lens-a"></span>
+                                <span class="lens lens-b"></span>
+                                <span class="lens lens-c"></span>
+                            </div>
 
-                        <div class="focus-box focus-primary"></div>
+                            <div class="focus-box focus-primary"></div>
 
-                        <div class="focus-box focus-secondary"></div>
+                            <div class="focus-box focus-secondary"></div>
 
-                        <div class="exposure-ruler">
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
+                            <div class="exposure-ruler">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                panel.innerHTML = createEmptyCapturePanel();
+            }
         } else {
             panel.innerHTML = createEmptyCapturePanel();
         }
-    } else {
+    } catch (error) {
         panel.innerHTML = createEmptyCapturePanel();
     }
 
@@ -1949,6 +2054,8 @@ async function updateStatus({ force = false } = {}) {
     }
   } catch (error) {
     console.error("데이터 수신 오류:", error);
+    setLiveSyncEnabled(false);
+    showDefaultLiveCapture("WAIT");
   } finally {
     if (requestSerial === statusRequestSerial) {
       statusUpdateInProgress = false;
@@ -2203,7 +2310,7 @@ function init() {
   renderTcTree();
   updateMetrics();
   updateCurrentTestGuide();
-  clearLiveCaptureDisplay();
+  showDefaultLiveCapture("WAIT");
   startLogSimulation();
 
   const tcTreeContainer = document.getElementById("tcTreeContainer");

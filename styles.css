@@ -165,6 +165,27 @@ h1 {
   min-width: 0;
 }
 
+.brand-title-line {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.brand-title-line h1 {
+  min-width: 0;
+}
+
+.android-title-logo {
+  flex: 0 0 auto;
+  width: clamp(44px, 3.4vw, 66px);
+  height: clamp(44px, 3.4vw, 66px);
+  object-fit: contain;
+  filter:
+    drop-shadow(0 0 12px rgba(97, 211, 148, 0.38))
+    drop-shadow(0 10px 22px rgba(0, 0, 0, 0.38));
+}
+
 h2 {
   font-size: 20px;
   line-height: 1.15;
@@ -439,6 +460,14 @@ h2 {
 
 .dut-mirror.hidden {
   display: none;
+}
+
+.dut-mirror.placeholder-capture {
+  object-fit: contain;
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0.045), transparent 34%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 5px),
+    linear-gradient(145deg, #07100f 0%, #0f1d18 52%, #15130c 100%);
 }
 
 .camera-scene.has-live-feed .target-card,
