@@ -1205,6 +1205,25 @@ class ITSMonitor:
 
         return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
+    def get_result_images(self, its_dir: Path | None = None) -> List[Path]:
+        search_dir = its_dir or self.get_latest_dir()
+        if not search_dir:
+            return []
+
+        candidates = []
+        for image_path in search_dir.rglob("*"):
+            if not image_path.is_file() or image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            try:
+                candidates.append((image_path.stat().st_mtime, str(image_path), image_path))
+            except OSError:
+                continue
+
+        return [
+            image_path
+            for _, _, image_path in sorted(candidates, key=lambda item: (item[0], item[1]))
+        ]
+
     def get_current_event(self, camera_id: str | None = None) -> Dict[str, Any] | None:
         with self.replay_lock:
             if camera_id:
@@ -1223,6 +1242,21 @@ class ITSMonitor:
 
         return self.get_latest_image(Path(artifact_dir))
 
+    def get_event_images(
+        self,
+        event: Dict[str, Any] | None = None,
+        camera_id: str | None = None,
+    ) -> List[Path]:
+        current_event = event or self.get_current_event(camera_id)
+        if not current_event:
+            return []
+
+        artifact_dir = current_event.get("artifactDir")
+        if not artifact_dir:
+            return []
+
+        return self.get_result_images(Path(artifact_dir))
+
     def get_capture_info(self, camera_id: str | None = None) -> Dict[str, Any]:
         current_event = self.get_current_event(camera_id)
         if not current_event:
@@ -1235,8 +1269,8 @@ class ITSMonitor:
             }
 
         artifact_dir = Path(current_event["artifactDir"]) if current_event.get("artifactDir") else None
-        image_path = self.get_event_image(current_event)
-        if not image_path:
+        image_paths = self.get_event_images(current_event)
+        if not image_paths:
             return {
                 "available": False,
                 "imageUrl": "/latest-capture-image",
@@ -1249,6 +1283,7 @@ class ITSMonitor:
                 "message": "No capture image for the current CameraITS TC.",
             }
 
+        image_path = image_paths[-1]
         try:
             updated_at = image_path.stat().st_mtime
         except OSError:
@@ -1263,7 +1298,15 @@ class ITSMonitor:
             "scene": current_event["scene"],
             "test": current_event["test"],
             "sequence": current_event.get("sequence", 0),
+            "imageCount": len(image_paths),
             "relativePath": str(image_path.relative_to(artifact_dir)).replace("\\", "/") if artifact_dir else image_path.name,
+            "images": [
+                {
+                    "fileName": item.name,
+                    "relativePath": str(item.relative_to(artifact_dir)).replace("\\", "/") if artifact_dir else item.name,
+                }
+                for item in image_paths
+            ],
             "sourceDir": str(artifact_dir) if artifact_dir else "",
             "updatedAt": updated_at,
         }
@@ -1836,7 +1879,16 @@ class ItsHandler(BaseHTTPRequestHandler):
         elif request_path == "/latest-capture-image":
             query = parse_qs(parsed_url.query)
             camera_id = query.get("camera", [""])[0] or None
-            image_path = self.monitor.get_event_image(camera_id=camera_id)
+            try:
+                image_index = int(query.get("image", ["-1"])[0])
+            except (TypeError, ValueError):
+                image_index = -1
+
+            image_paths = self.monitor.get_event_images(camera_id=camera_id)
+            if image_paths:
+                image_path = image_paths[image_index % len(image_paths)]
+            else:
+                image_path = None
             if not image_path:
                 self.send_response(404)
                 self.send_header("Access-Control-Allow-Origin", "*")

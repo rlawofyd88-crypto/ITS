@@ -426,10 +426,14 @@ const LOG_OUTPUT_MAX_WAIT_MS = 420;
 const LOG_OUTPUT_IDLE_SLEEP_MS = 20;
 const LOG_OUTPUT_EMPTY_DELAY_MS = 40;
 const TC_AUTO_SCROLL_GRACE_MS = 900;
+const CAPTURE_IMAGE_ROTATE_MS = 1000;
 const LOG_TIMESTAMP_RE = /^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)/;
 const MAX_RUN_TABS = 5;
 const INITIAL_LIVE_LOG_TAIL = 120;
 let liveFeedObjectUrl = null;
+let liveCaptureInfo = null;
+let liveCaptureStartedAt = 0;
+let liveCaptureImageRequestKey = "";
 let currentCaptureKey = "";
 let lastAppliedCaptureSequence = 0;
 let currentRunPath = "";
@@ -826,16 +830,10 @@ function setLiveSyncEnabled(enabled) {
     pendingTcFocus = null;
     pendingTcUpdates = [];
     currentCaptureKey = "";
+    clearLiveCaptureDisplay();
     if (liveBadge) {
       liveBadge.textContent = "IDLE";
     }
-    if (liveFeedObjectUrl) {
-      URL.revokeObjectURL(liveFeedObjectUrl);
-      liveFeedObjectUrl = null;
-    }
-    dutMirror?.removeAttribute("src");
-    dutMirror?.classList.add("hidden");
-    cameraScene?.classList.remove("has-live-feed");
   }
 }
 
@@ -867,6 +865,7 @@ function applyRunInfo(runInfo) {
     pendingTcFocus = null;
     pendingTcUpdates = [];
     clearLogViewer();
+    clearLiveCaptureDisplay();
     lastLogSequence = 0;
   } else if (!currentRunPath && nextRunPath) {
     currentRunPath = nextRunPath;
@@ -985,17 +984,6 @@ function getSelectedCapture(data) {
   const capture = selectedCameraId && cameraCaptures[selectedCameraId]
     ? cameraCaptures[selectedCameraId]
     : (data.capture || null);
-  const activeExecution = getSelectedActiveExecution(data);
-
-  if (
-    capture &&
-    activeExecution &&
-    capture.sourceDir &&
-    activeExecution.sourceDir &&
-    capture.sourceDir !== activeExecution.sourceDir
-  ) {
-    return null;
-  }
   return capture;
 }
 
@@ -1096,27 +1084,52 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
 
 function applyCaptureInfo(capture) {
   if (!capture) {
-    currentCaptureKey = "";
     liveBadge.textContent = "WAIT";
     return false;
   }
 
-  const captureKey = `${capture.sequence || 0}:${capture.cameraId || ""}:${capture.scene || ""}:${capture.test || ""}:${capture.fileName || ""}`;
+  const captureKey = [
+    capture.sequence || 0,
+    capture.cameraId || "",
+    capture.scene || "",
+    capture.test || "",
+    capture.sourceDir || "",
+    capture.updatedAt || 0,
+    capture.imageCount || 0,
+    capture.fileName || ""
+  ].join(":");
   const changed = captureKey !== currentCaptureKey;
   currentCaptureKey = captureKey;
 
-  const cameraPrefix = capture.cameraId ? `${capture.cameraId} / ` : "";
   if (!capture.available) {
     liveBadge.textContent = capture.test ? "NO IMG" : "WAIT";
     return changed;
   }
 
+  liveCaptureInfo = capture;
+  if (changed) {
+    liveCaptureStartedAt = Date.now();
+    liveCaptureImageRequestKey = "";
+  }
   liveBadge.textContent = "CAPTURE";
   return changed;
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clearLiveCaptureDisplay() {
+  liveCaptureInfo = null;
+  liveCaptureStartedAt = 0;
+  liveCaptureImageRequestKey = "";
+  if (liveFeedObjectUrl) {
+    URL.revokeObjectURL(liveFeedObjectUrl);
+    liveFeedObjectUrl = null;
+  }
+  dutMirror?.removeAttribute("src");
+  dutMirror?.classList.add("hidden");
+  cameraScene?.classList.remove("has-live-feed");
 }
 
 function parseLogTimestamp(text) {
@@ -1275,10 +1288,27 @@ async function refreshLiveFeed() {
     return;
   }
 
+  if (!liveCaptureInfo?.available) {
+    return;
+  }
+
   try {
+    const imageCount = Math.max(1, Number(liveCaptureInfo.imageCount || 1));
+    const imageIndex = imageCount > 1
+      ? Math.floor((Date.now() - liveCaptureStartedAt) / CAPTURE_IMAGE_ROTATE_MS) % imageCount
+      : imageCount - 1;
+    const imageRequestKey = `${currentCaptureKey}:${imageIndex}`;
+    if (imageRequestKey === liveCaptureImageRequestKey) {
+      return;
+    }
+    liveCaptureImageRequestKey = imageRequestKey;
+
     const feedParams = new URLSearchParams({ t: String(Date.now()) });
     if (!hasCustomLiveFeed && selectedCameraId) {
       feedParams.set("camera", selectedCameraId);
+    }
+    if (!hasCustomLiveFeed) {
+      feedParams.set("image", String(imageIndex));
     }
     const separator = liveFeedPath.includes("?") ? "&" : "?";
     const response = await fetch(`${liveFeedPath}${separator}${feedParams.toString()}`, { cache: "no-store" });
@@ -1300,9 +1330,13 @@ async function refreshLiveFeed() {
     };
     dutMirror.onerror = () => {
       URL.revokeObjectURL(nextUrl);
+      liveCaptureImageRequestKey = "";
+      dutMirror.onload = null;
       if (liveFeedObjectUrl) {
-        URL.revokeObjectURL(liveFeedObjectUrl);
-        liveFeedObjectUrl = null;
+        dutMirror.src = liveFeedObjectUrl;
+        dutMirror.classList.remove("hidden");
+        cameraScene.classList.add("has-live-feed");
+        return;
       }
       dutMirror.removeAttribute("src");
       dutMirror.classList.add("hidden");
@@ -1311,13 +1345,12 @@ async function refreshLiveFeed() {
     dutMirror.src = nextUrl;
     cameraScene.classList.add("has-live-feed");
   } catch (error) {
-    if (liveFeedObjectUrl) {
-      URL.revokeObjectURL(liveFeedObjectUrl);
-      liveFeedObjectUrl = null;
+    liveCaptureImageRequestKey = "";
+    if (!liveFeedObjectUrl) {
+      dutMirror.removeAttribute("src");
+      dutMirror.classList.add("hidden");
+      cameraScene.classList.remove("has-live-feed");
     }
-    dutMirror.removeAttribute("src");
-    dutMirror.classList.add("hidden");
-    cameraScene.classList.remove("has-live-feed");
   }
 }
 
@@ -2170,6 +2203,7 @@ function init() {
   renderTcTree();
   updateMetrics();
   updateCurrentTestGuide();
+  clearLiveCaptureDisplay();
   startLogSimulation();
 
   const tcTreeContainer = document.getElementById("tcTreeContainer");
