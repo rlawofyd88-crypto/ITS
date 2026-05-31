@@ -113,6 +113,9 @@ LIVE_LOG_ARTIFACT_RE = re.compile(
 LIVE_LOG_SUMMARY_RE = re.compile(
     r'Test summary saved in "(?P<path>[^"]+)"'
 )
+LIVE_LOG_ROOT_OUTPUT_RE = re.compile(
+    r"root_output_path:\s*(?P<path>\S+)"
+)
 
 class ITSMonitor:
     def __init__(self, root_dir: Path, replay_interval: float = 0.5):
@@ -134,6 +137,7 @@ class ITSMonitor:
         self.live_file_offsets: Dict[str, int] = {}
         self.last_emitted_log_camera_id = ""
         self.fixed_log_context: Dict[str, str] = {}
+        self.fixed_live_target_run_key = ""
         self.fixed_live_results_by_run: Dict[str, Dict[str, Dict[str, Dict[str, int]]]] = {}
         self.fixed_live_events_by_run: Dict[str, Dict[tuple[str, str, str], Dict[str, Any]]] = {}
         self.active_execution: Dict[str, Any] | None = None
@@ -308,9 +312,65 @@ class ITSMonitor:
             return ""
         return Path(run_dir).name
 
+    def is_target_run_dir(
+        self,
+        run_dir: Path | str | None,
+        target_run_dir: Path | str | None,
+    ) -> bool:
+        if not target_run_dir:
+            return True
+        return self.fixed_live_run_key(run_dir) == self.fixed_live_run_key(
+            target_run_dir
+        )
+
+    def get_fixed_live_initial_offset(
+        self,
+        log_path: Path,
+        target_run_dir: Path | None,
+    ) -> int | None:
+        if not target_run_dir:
+            return 0
+
+        target_text = str(target_run_dir)
+        try:
+            with log_path.open("rb") as file:
+                offset = 0
+                for line in file:
+                    if (
+                        b"LIVE_LOG_START" in line
+                        and target_text.encode("utf-8") in line
+                    ):
+                        return offset
+                    offset += len(line)
+        except OSError:
+            return None
+
+        return None
+
     def get_fixed_live_results(self, run_dir: Path | None) -> Dict[str, Dict[str, Dict[str, int]]]:
         run_key = self.fixed_live_run_key(run_dir)
         return self.fixed_live_results_by_run.get(run_key, {}) if run_key else {}
+
+    def prepare_fixed_live_target(self, run_dir: Path | None) -> None:
+        run_key = self.fixed_live_run_key(run_dir)
+        if not run_key or run_key == self.fixed_live_target_run_key:
+            return
+
+        self.fixed_live_target_run_key = run_key
+        self.fixed_live_results_by_run.pop(run_key, None)
+        self.fixed_live_events_by_run.pop(run_key, None)
+        self.visible_results = {}
+        self.pending_results = []
+        self.published_events = []
+        self.current_event = None
+        self.current_events_by_camera = {}
+        self.log_entries = []
+        self.log_sequence = 0
+        self.live_file_offsets = {}
+        self.last_emitted_log_camera_id = ""
+        self.fixed_log_context = {}
+        self.active_execution = None
+        self.active_executions_by_camera = {}
 
     def merge_tc_results(
         self,
@@ -797,6 +857,7 @@ class ITSMonitor:
         return bool(selected_logs)
 
     def collect_fixed_live_logs(self, its_dir: Path) -> bool:
+        self.prepare_fixed_live_target(its_dir)
         selected_logs = []
         search_roots = [its_dir]
         parent_dir = its_dir.parent if its_dir.parent != its_dir else None
@@ -812,11 +873,15 @@ class ITSMonitor:
 
         selected_logs.sort(key=self.path_mtime)
         for log_path in selected_logs:
-          self.collect_incremental_fixed_live_log(log_path)
+          self.collect_incremental_fixed_live_log(log_path, its_dir)
 
         return bool(selected_logs)
 
-    def collect_incremental_fixed_live_log(self, log_path: Path) -> None:
+    def collect_incremental_fixed_live_log(
+        self,
+        log_path: Path,
+        target_run_dir: Path | None = None,
+    ) -> None:
         try:
             stat_result = log_path.stat()
         except OSError:
@@ -832,7 +897,17 @@ class ITSMonitor:
 
         try:
             with log_path.open("r", encoding="utf-8", errors="ignore") as file:
-                file.seek(previous_offset)
+                if previous_offset == 0:
+                    initial_offset = self.get_fixed_live_initial_offset(
+                        log_path,
+                        target_run_dir,
+                    )
+                    if initial_offset is None and target_run_dir:
+                        self.live_file_offsets[path_key] = stat_result.st_size
+                        return
+                    file.seek(initial_offset or 0)
+                else:
+                    file.seek(previous_offset)
                 new_text = file.read()
                 self.live_file_offsets[path_key] = file.tell()
         except OSError:
@@ -849,6 +924,7 @@ class ITSMonitor:
             if start_match:
                 output_path = start_match.group("output") or ""
                 run_dir = self.get_run_dir_from_path(output_path)
+                is_target_run = self.is_target_run_dir(run_dir, target_run_dir)
                 self.fixed_log_context = {
                     "cameraId": start_match.group("camera") or DEFAULT_CAMERA_ID,
                     "scene": start_match.group("scene") or "",
@@ -857,20 +933,22 @@ class ITSMonitor:
                     "runPath": str(run_dir) if run_dir else "",
                     "artifactDir": "",
                     "logFile": "",
+                    "isTargetRun": "1" if is_target_run else "",
                 }
-                self.set_active_execution(
-                    self.fixed_log_context["cameraId"],
-                    self.fixed_log_context["scene"],
-                    self.fixed_log_context["test"],
-                    log_path.parent,
-                )
-                self.append_log_entry(
-                    self.fixed_log_context["cameraId"],
-                    self.fixed_log_context["scene"],
-                    self.fixed_log_context["test"],
-                    stripped,
-                    "LIVE_LOG",
-                )
+                if is_target_run:
+                    self.set_active_execution(
+                        self.fixed_log_context["cameraId"],
+                        self.fixed_log_context["scene"],
+                        self.fixed_log_context["test"],
+                        log_path.parent,
+                    )
+                    self.append_log_entry(
+                        self.fixed_log_context["cameraId"],
+                        self.fixed_log_context["scene"],
+                        self.fixed_log_context["test"],
+                        stripped,
+                        "LIVE_LOG",
+                    )
                 continue
 
             end_match = LIVE_LOG_END_RE.match(stripped)
@@ -885,32 +963,103 @@ class ITSMonitor:
                     self.fixed_log_context.get("runPath")
                     or self.fixed_log_context.get("outputPath")
                 )
+                is_target_run = self.is_target_run_dir(run_dir, target_run_dir)
                 artifact_dir = Path(self.fixed_log_context["artifactDir"]) if self.fixed_log_context.get("artifactDir") else None
                 log_file = Path(self.fixed_log_context["logFile"]) if self.fixed_log_context.get("logFile") else None
                 status = self.fixed_live_status_from_returncode(
                     end_match.group("returncode")
                 )
+                if is_target_run:
+                    self.remember_fixed_live_result(
+                        run_dir,
+                        camera_id,
+                        scene_name,
+                        test_name,
+                        status,
+                        artifact_dir=artifact_dir,
+                        log_file=log_file,
+                    )
+                    self.append_log_entry(
+                        camera_id, scene_name, test_name, stripped, "LIVE_LOG")
+                    self.clear_active_execution(camera_id, scene_name, test_name)
+                self.fixed_log_context = {}
+                continue
+
+            prefix_match = LIVE_LOG_PREFIX_RE.match(stripped)
+            camera_id = self.fixed_log_context.get("cameraId", DEFAULT_CAMERA_ID)
+            scene_name = (
+                prefix_match.group("scene")
+                if prefix_match
+                else self.fixed_log_context.get("scene", "")
+            )
+            test_name = (
+                prefix_match.group("test").replace(".py", "")
+                if prefix_match
+                else self.fixed_log_context.get("test", "")
+            )
+            if scene_name:
+                self.fixed_log_context["scene"] = scene_name
+            if test_name:
+                self.fixed_log_context["test"] = test_name
+
+            result_match = TEST_LOG_RESULT_RE.search(stripped)
+            if result_match:
+                result_test_name = self.normalize_test_name(
+                    scene_name,
+                    result_match.group(1),
+                )
+                run_dir = self.get_run_dir_from_path(
+                    self.fixed_log_context.get("runPath")
+                    or self.fixed_log_context.get("outputPath")
+                    or self.fixed_log_context.get("artifactDir")
+                )
+                if not self.is_target_run_dir(run_dir, target_run_dir):
+                    continue
+                artifact_dir = (
+                    Path(self.fixed_log_context["artifactDir"])
+                    if self.fixed_log_context.get("artifactDir")
+                    else None
+                )
+                log_file = (
+                    Path(self.fixed_log_context["logFile"])
+                    if self.fixed_log_context.get("logFile")
+                    else None
+                )
                 self.remember_fixed_live_result(
                     run_dir,
                     camera_id,
                     scene_name,
-                    test_name,
-                    status,
+                    result_test_name,
+                    self.status_value(result_match.group(2)),
                     artifact_dir=artifact_dir,
                     log_file=log_file,
                 )
-                self.append_log_entry(
-                    camera_id, scene_name, test_name, stripped, "LIVE_LOG")
-                self.clear_active_execution(camera_id, scene_name, test_name)
-                self.fixed_log_context = {}
-                continue
 
-            camera_id = self.fixed_log_context.get("cameraId", DEFAULT_CAMERA_ID)
-            scene_name = self.fixed_log_context.get("scene", "")
-            test_name = self.fixed_log_context.get("test", "")
+            root_output_match = LIVE_LOG_ROOT_OUTPUT_RE.search(stripped)
+            if root_output_match:
+                self.fixed_log_context["artifactDir"] = root_output_match.group("path")
+                run_dir = self.get_run_dir_from_path(root_output_match.group("path"))
+                if run_dir:
+                    self.fixed_log_context["runPath"] = str(run_dir)
+                    self.fixed_log_context["isTargetRun"] = (
+                        "1"
+                        if self.is_target_run_dir(run_dir, target_run_dir)
+                        else ""
+                    )
+                candidate_log = Path(root_output_match.group("path")) / "test_log.DEBUG"
+                if candidate_log.is_file():
+                    self.fixed_log_context["logFile"] = str(candidate_log)
             artifact_match = LIVE_LOG_ARTIFACT_RE.search(stripped)
             if artifact_match:
                 self.fixed_log_context["artifactDir"] = artifact_match.group("path")
+                run_dir = self.get_run_dir_from_path(artifact_match.group("path"))
+                if run_dir:
+                    self.fixed_log_context["runPath"] = str(run_dir)
+                    self.fixed_log_context["isTargetRun"] = (
+                        "1"
+                        if self.is_target_run_dir(run_dir, target_run_dir)
+                        else ""
+                    )
                 candidate_log = Path(artifact_match.group("path")) / "test_log.DEBUG"
                 if candidate_log.is_file():
                     self.fixed_log_context["logFile"] = str(candidate_log)
@@ -918,11 +1067,20 @@ class ITSMonitor:
             if summary_match:
                 summary_path = Path(summary_match.group("path"))
                 self.fixed_log_context["artifactDir"] = str(summary_path.parent)
+                run_dir = self.get_run_dir_from_path(summary_path.parent)
+                if run_dir:
+                    self.fixed_log_context["runPath"] = str(run_dir)
+                    self.fixed_log_context["isTargetRun"] = (
+                        "1"
+                        if self.is_target_run_dir(run_dir, target_run_dir)
+                        else ""
+                    )
                 candidate_log = summary_path.parent / "test_log.DEBUG"
                 if candidate_log.is_file():
                     self.fixed_log_context["logFile"] = str(candidate_log)
-            self.append_log_entry(
-                camera_id, scene_name, test_name, stripped, "LIVE_LOG")
+            if self.fixed_log_context.get("isTargetRun"):
+                self.append_log_entry(
+                    camera_id, scene_name, test_name, stripped, "LIVE_LOG")
 
     def collect_incremental_live_log(self, log_path: Path, its_dir: Path) -> None:
         try:
