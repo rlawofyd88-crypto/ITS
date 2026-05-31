@@ -425,6 +425,7 @@ const LOG_OUTPUT_MAX_WAIT_MS = 420;
 const LOG_OUTPUT_IDLE_SLEEP_MS = 20;
 const LOG_OUTPUT_EMPTY_DELAY_MS = 40;
 const LOG_TIMESTAMP_RE = /^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)/;
+const MAX_RUN_TABS = 5;
 let liveFeedObjectUrl = null;
 let currentCaptureKey = "";
 let lastAppliedCaptureSequence = 0;
@@ -449,6 +450,8 @@ let runActiveCameraIds = {};
 let selectedRunId = "";
 let activeRunId = "";
 let selectedRunIsActive = true;
+let liveSyncEnabled = null;
+let liveRunAvailable = false;
 let currentTreeSignature = "";
 
 function getLogLevel(text) {
@@ -558,20 +561,41 @@ function renderRunTabs() {
   }
 
   runTabsContainer.innerHTML = "";
-  const visibleRuns = runTabs.length
+  const availableRuns = runTabs.length
     ? runTabs
     : [{ id: "waiting", name: "CameraITS_*", active: true }];
+  const liveRuns = liveRunAvailable
+    ? availableRuns.filter((run) => getRunId(run) === activeRunId)
+    : [];
+  const pastRuns = availableRuns.filter((run) => getRunId(run) !== activeRunId);
+  const visibleRuns = liveRunAvailable
+    ? [...liveRuns, ...pastRuns].slice(0, MAX_RUN_TABS)
+    : availableRuns.slice(0, MAX_RUN_TABS);
+  let separatorAdded = false;
 
   visibleRuns.forEach((run) => {
     const runId = getRunId(run);
+    const isLiveRun = liveRunAvailable && runId === activeRunId;
+    const isWaitingFallback = !runTabs.length && runId === "waiting";
+    const isSelected = runId === selectedRunId || (!selectedRunId && (isLiveRun || isWaitingFallback));
+    if (liveRunAvailable && !isLiveRun && !separatorAdded && runTabsContainer.childElementCount > 0) {
+      const separator = document.createElement("span");
+      separator.className = "run-tab-separator";
+      separator.setAttribute("aria-hidden", "true");
+      runTabsContainer.appendChild(separator);
+      separatorAdded = true;
+    }
+
     const tabButton = document.createElement("button");
     tabButton.type = "button";
     tabButton.className = "run-tab";
     tabButton.textContent = run.name || runId || "CameraITS_*";
     tabButton.title = run.path || tabButton.textContent;
     tabButton.dataset.runId = runId;
-    tabButton.classList.toggle("active", runId === selectedRunId || (!selectedRunId && run.active));
-    tabButton.classList.toggle("running", Boolean(run.active));
+    tabButton.classList.toggle("active", isSelected);
+    tabButton.classList.toggle("live-run", isLiveRun);
+    tabButton.classList.toggle("past-run", !isLiveRun);
+    tabButton.classList.toggle("running", isLiveRun);
     tabButton.setAttribute("aria-pressed", tabButton.classList.contains("active") ? "true" : "false");
     tabButton.addEventListener("click", () => {
       selectedRunId = runId;
@@ -579,6 +603,7 @@ function renderRunTabs() {
       selectedCameraId = runActiveCameraIds[selectedRunId] || nextCameras[0]?.id || "";
       if (latestDashboardData) {
         applyCameraState(latestDashboardData, { followActive: false });
+        setLiveSyncEnabled(isLiveSyncData(latestDashboardData));
         applySelectedCameraData({ data: latestDashboardData, scrollFocusedTc: true });
       }
     });
@@ -599,20 +624,63 @@ function applySelectedRunBadge() {
 }
 
 function applyRunState(data) {
+  const previousActiveRunId = activeRunId;
   runTabs = Array.isArray(data.runs) ? data.runs : [];
   runCameras = data.runCameras || {};
   runCameraTrees = data.runCameraTrees || {};
   runActiveCameraIds = data.runActiveCameraIds || {};
 
-  activeRunId = getRunId(runTabs.find((run) => run.active));
+  liveRunAvailable = Boolean(
+    data?.liveState?.state === "running" &&
+    data?.activeExecution?.scene &&
+    data?.activeExecution?.test
+  );
+  activeRunId = liveRunAvailable ? getRunId(runTabs.find((run) => run.active)) : "";
 
-  if (!selectedRunId || !runTabs.some((run) => getRunId(run) === selectedRunId)) {
+  if (liveRunAvailable && activeRunId && activeRunId !== previousActiveRunId) {
+    selectedRunId = activeRunId;
+  } else if (!selectedRunId || !runTabs.some((run) => getRunId(run) === selectedRunId)) {
     selectedRunId = activeRunId || getRunId(runTabs[0]) || "";
   }
 
   selectedRunIsActive = Boolean(activeRunId && selectedRunId === activeRunId);
   renderRunTabs();
   applySelectedRunBadge();
+}
+
+function isLiveSyncData(data) {
+  return Boolean(
+    selectedRunIsActive &&
+    data?.liveState?.state === "running" &&
+    data?.activeExecution?.scene &&
+    data?.activeExecution?.test
+  );
+}
+
+function setLiveSyncEnabled(enabled) {
+  const nextEnabled = Boolean(enabled);
+  if (liveSyncEnabled === nextEnabled) {
+    return;
+  }
+
+  liveSyncEnabled = nextEnabled;
+  if (!liveSyncEnabled) {
+    clearLogViewer();
+    lastLogSequence = 0;
+    pendingTcFocus = null;
+    pendingTcUpdates = [];
+    currentCaptureKey = "";
+    if (liveBadge) {
+      liveBadge.textContent = "IDLE";
+    }
+    if (liveFeedObjectUrl) {
+      URL.revokeObjectURL(liveFeedObjectUrl);
+      liveFeedObjectUrl = null;
+    }
+    dutMirror?.removeAttribute("src");
+    dutMirror?.classList.add("hidden");
+    cameraScene?.classList.remove("has-live-feed");
+  }
 }
 
 function applyItsData(data) {
@@ -778,7 +846,7 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
   const selectedTree = getSelectedTree(data);
   syncVisibleTcTree(selectedTree);
 
-  if (!selectedRunIsActive) {
+  if (!selectedRunIsActive || !liveSyncEnabled) {
     return;
   }
 
@@ -1029,6 +1097,10 @@ async function refreshLiveFeed() {
     '.capture-panel[data-capture-tab-id="live"]'
   );
 
+  if (!liveSyncEnabled) {
+    return;
+  }
+
   // LIVE Capture Tab 이 활성 상태가 아니면 polling 중단
   if (!livePanel?.classList.contains("active")) {
     return;
@@ -1179,7 +1251,9 @@ function activateLogTab(tabId) {
         logAutoFollow = true;
     
         // Capture 도 LIVE 로 동기화
-        activateCaptureTab("live");
+        if (liveSyncEnabled) {
+            activateCaptureTab("live");
+        }
     
         if (liveViewer) {
             requestAnimationFrame(() => {
@@ -1239,7 +1313,9 @@ function activateCaptureTab(tabId) {
         // LIVE 탭 복귀 시 즉시 최신 Capture 반영
         if (tabId === "live") {
             requestAnimationFrame(() => {
-                refreshLiveFeed();
+                if (liveSyncEnabled) {
+                    refreshLiveFeed();
+                }
             });
         }
     }
@@ -1260,7 +1336,8 @@ function createTcLogTab(
     logs,
     cameraId,
     sceneName,
-    testName
+    testName,
+    runId = selectedRunId
 ) {
     const existingTab = tcLogTabs.find(
         (tab) => tab.id === tabId
@@ -1272,7 +1349,8 @@ function createTcLogTab(
         showTcCaptureTab(
             cameraId,
             sceneName,
-            testName
+            testName,
+            runId
         );
       
         return;
@@ -1304,7 +1382,8 @@ function createTcLogTab(
         showTcCaptureTab(
             cameraId,
             sceneName,
-            testName
+            testName,
+            runId
         );
     });
 
@@ -1355,6 +1434,7 @@ function createTcLogTab(
 
     tcLogTabs.push({
         id: tabId,
+        runId,
         cameraId,
         sceneName,
         testName
@@ -1363,10 +1443,12 @@ function createTcLogTab(
     activateLogTab(tabId);
 }
 async function openTcLogTab(cameraId, sceneName, testName) {
+    const runId = selectedRunId;
     try {
         const response = await fetch(
             `${monitorEndpoint}/get-tc-log`
-            + `?camera=${encodeURIComponent(cameraId)}`
+            + `?run=${encodeURIComponent(runId)}`
+            + `&camera=${encodeURIComponent(cameraId)}`
             + `&scene=${encodeURIComponent(sceneName)}`
             + `&test=${encodeURIComponent(testName)}`,
             {
@@ -1381,18 +1463,20 @@ async function openTcLogTab(cameraId, sceneName, testName) {
         const data = await response.json();
 
         createTcLogTab(
-            `${cameraId}:${sceneName}:${testName}`,
+            `${runId}:${cameraId}:${sceneName}:${testName}`,
             formatTcName(testName),
             data.logs || [],
             cameraId,
             sceneName,
-            testName
+            testName,
+            runId
         );
 
         showTcCaptureTab(
             cameraId,
             sceneName,
-            testName
+            testName,
+            runId
         );
     } catch (error) {
         console.error(error);
@@ -1443,12 +1527,13 @@ function createEmptyCapturePanel() {
 async function showTcCaptureTab(
     cameraId,
     sceneName,
-    testName
+    testName,
+    runId = selectedRunId
 ) {
     const tabId = "tc-capture";
 
     const captureKey =
-        `${cameraId}:${sceneName}:${testName}`;
+        `${runId}:${cameraId}:${sceneName}:${testName}`;
 
     // 동일 Capture 재선택이면 skip
     if (currentCaptureTabKey === captureKey) {
@@ -1514,7 +1599,8 @@ async function showTcCaptureTab(
 
     const response = await fetch(
         `${monitorEndpoint}/get-tc-capture`
-        + `?camera=${encodeURIComponent(cameraId)}`
+        + `?run=${encodeURIComponent(runId)}`
+        + `&camera=${encodeURIComponent(cameraId)}`
         + `&scene=${encodeURIComponent(sceneName)}`
         + `&test=${encodeURIComponent(testName)}`,
         {
@@ -1585,10 +1671,11 @@ function applyDashboardData(data, { scrollFocusedTc = false, followActiveCamera 
   latestDashboardData = data;
   applyRunInfo(data.run);
   applyCameraState(data, { followActive: followActiveCamera });
+  setLiveSyncEnabled(isLiveSyncData(data));
 
-  if (data.activeExecution) {
+  if (liveSyncEnabled && data.activeExecution) {
     pendingTcFocus = data.activeExecution;
-  } else if (data.capture) {
+  } else if (liveSyncEnabled && data.capture) {
     pendingTcFocus = data.capture;
   }
 
@@ -1607,8 +1694,14 @@ async function updateStatus() {
     const data = await response.json();
 
     if (data) {
+      applyRunState(data);
+      setLiveSyncEnabled(isLiveSyncData(data));
       const captureSequence = Number(data.capture?.sequence || 0);
-      const hasNewCapture = captureSequence && captureSequence > lastAppliedCaptureSequence;
+      const hasNewCapture = Boolean(
+        liveSyncEnabled &&
+        captureSequence &&
+        captureSequence > lastAppliedCaptureSequence
+      );
       if (hasNewCapture) {
         applyCameraState(data, { followActive: true });
         syncLogSequenceToCapture(data.capture);
@@ -1661,6 +1754,10 @@ function syncLogSequenceToCapture(capture) {
 }
 
 async function fetchLiveLogs() {
+    if (!liveSyncEnabled) {
+        return 0;
+    }
+
     try {
         const response = await fetch(`${monitorEndpoint}/get-live-logs?since=${lastLogSequence}`, { cache: "no-store" });
         const logs = await response.json();
@@ -1800,7 +1897,7 @@ async function startLogSimulation() {
         }
 
         // TC sync
-        if (selectedRunIsActive && rawText.includes("Test results:")) {
+        if (selectedRunIsActive && liveSyncEnabled && rawText.includes("Test results:")) {
 
             const nextTcUpdate =
                 pendingTcUpdates.shift();

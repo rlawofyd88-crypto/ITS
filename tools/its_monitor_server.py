@@ -278,6 +278,20 @@ class ITSMonitor:
                 return candidate
         return None
 
+    def get_run_dir_by_id(self, run_id: str | None) -> Path | None:
+        if not run_id:
+            return None
+
+        candidate = Path(run_id)
+        if candidate.is_dir() and candidate.name.startswith("CameraITS_"):
+            return candidate
+
+        root = self.root_dir.parent if self.root_dir.name.startswith("CameraITS_") else self.root_dir
+        candidate = root / run_id
+        if candidate.is_dir() and candidate.name.startswith("CameraITS_"):
+            return candidate
+        return None
+
     def get_live_state_path(self) -> Path:
         override_path = os.environ.get("ITS_LIVE_STATE_PATH")
         if override_path:
@@ -305,6 +319,14 @@ class ITSMonitor:
         run_dir = self.get_run_dir_from_path(live_state.get("runPath"))
         return run_dir if run_dir and run_dir.is_dir() else None
 
+    def is_live_test_running(self, live_state: Dict[str, Any] | None) -> bool:
+        return bool(
+            live_state
+            and live_state.get("state") == "running"
+            and live_state.get("scene")
+            and live_state.get("test")
+        )
+
     def clear_all_active_executions(self) -> None:
         self.active_execution = None
         self.active_executions_by_camera = {}
@@ -312,6 +334,7 @@ class ITSMonitor:
     def apply_live_state(self) -> Dict[str, Any] | None:
         live_state = self.read_live_state()
         if not live_state:
+            self.clear_all_active_executions()
             return None
 
         if live_state.get("state") != "running":
@@ -1097,6 +1120,23 @@ class ITSMonitor:
         self.static_run_results_cache[cache_key] = (cache_mtime, results)
         return results
 
+    def find_event(
+        self,
+        its_dir: Path,
+        camera_id: str,
+        scene_name: str,
+        test_name: str,
+    ) -> Dict[str, Any] | None:
+        normalized_test_name = self.normalize_test_name(scene_name, test_name)
+        for event in reversed(self.discover_tc_result_events(its_dir)):
+            if (
+                event.get("cameraId") == camera_id
+                and event.get("scene") == scene_name
+                and event.get("test") == normalized_test_name
+            ):
+                return event
+        return None
+
     def publish_event(self, event: Dict[str, Any]) -> None:
         self.replay_sequence += 1
         published_event = dict(event)
@@ -1149,6 +1189,9 @@ class ITSMonitor:
     def get_released_log_data(self, since_sequence: int = 0) -> List[Dict[str, Any]]:
         with self.replay_lock:
             live_state = self.apply_live_state()
+            if not self.is_live_test_running(live_state):
+                return []
+
             self.collect_live_log_updates(
                 self.get_active_run_dir_from_state(live_state)
                 or self.get_latest_dir()
@@ -1314,20 +1357,29 @@ class ItsHandler(BaseHTTPRequestHandler):
 
         if request_path == "/its-status.json":
             live_state = self.monitor.apply_live_state()
+            live_test_running = self.monitor.is_live_test_running(live_state)
             latest_dir = (
                 self.monitor.get_active_run_dir_from_state(live_state)
                 or self.monitor.get_latest_dir()
             )
-            file_results = self.monitor.parse_tc_results(latest_dir) if latest_dir else {}
-            self.monitor.collect_live_log_updates(latest_dir)
+            if latest_dir and live_test_running:
+                file_results = self.monitor.parse_tc_results(latest_dir)
+                self.monitor.collect_live_log_updates(latest_dir)
+            else:
+                file_results = self.monitor.get_static_tc_results(latest_dir) if latest_dir else {}
             live_state = self.monitor.apply_live_state()
+            live_test_running = self.monitor.is_live_test_running(live_state)
             camera_ids = self.monitor.get_camera_ids(latest_dir)
             active_camera_id = self.monitor.get_active_camera_id(camera_ids)
-            active_execution = self.monitor.get_active_execution(active_camera_id or None)
+            active_execution = (
+                self.monitor.get_active_execution(active_camera_id or None)
+                if live_test_running
+                else None
+            )
             camera_trees = {
                 camera_id: self.monitor.get_updated_structure(
                     file_results.get(camera_id, {}),
-                    self.monitor.get_active_execution(camera_id),
+                    self.monitor.get_active_execution(camera_id) if live_test_running else None,
                 )
                 for camera_id in camera_ids
             }
@@ -1340,7 +1392,11 @@ class ItsHandler(BaseHTTPRequestHandler):
                 for camera_id in camera_ids
             }
             camera_active_executions = {
-                camera_id: self.monitor.get_active_execution(camera_id)
+                camera_id: (
+                    self.monitor.get_active_execution(camera_id)
+                    if live_test_running
+                    else None
+                )
                 for camera_id in camera_ids
             }
             runs = self.monitor.get_recent_runs(limit=5)
@@ -1350,7 +1406,11 @@ class ItsHandler(BaseHTTPRequestHandler):
             for run in runs:
                 run_dir = Path(run["path"])
                 is_active_run = bool(run.get("active"))
-                run_results = file_results if is_active_run else self.monitor.get_static_tc_results(run_dir)
+                run_results = (
+                    file_results
+                    if is_active_run and live_test_running
+                    else self.monitor.get_static_tc_results(run_dir)
+                )
                 run_camera_ids = self.monitor.get_camera_ids_from_results(run_dir, run_results)
                 if is_active_run:
                     run_active_camera_id = active_camera_id
@@ -1365,7 +1425,9 @@ class ItsHandler(BaseHTTPRequestHandler):
                 run_camera_trees[run["id"]] = {
                     camera_id: self.monitor.get_updated_structure(
                         run_results.get(camera_id, {}),
-                        self.monitor.get_active_execution(camera_id) if is_active_run else None,
+                        self.monitor.get_active_execution(camera_id)
+                        if is_active_run and live_test_running
+                        else None,
                     )
                     for camera_id in run_camera_ids
                 }
@@ -1437,16 +1499,27 @@ class ItsHandler(BaseHTTPRequestHandler):
                 camera_id = query.get("camera", [""])[0]
                 scene_name = query.get("scene", [""])[0]
                 test_name = query.get("test", [""])[0]
+                run_id = query.get("run", [""])[0]
                 matched_event = None
 
-                for event in reversed(self.monitor.published_events):
-                    if (
-                        event.get("cameraId") == camera_id
-                        and event.get("scene") == scene_name
-                        and event.get("test") == test_name
-                    ):
-                        matched_event = event
-                        break
+                run_dir = self.monitor.get_run_dir_by_id(run_id)
+                if run_dir:
+                    matched_event = self.monitor.find_event(
+                        run_dir,
+                        camera_id,
+                        scene_name,
+                        test_name,
+                    )
+
+                if not matched_event:
+                    for event in reversed(self.monitor.published_events):
+                        if (
+                            event.get("cameraId") == camera_id
+                            and event.get("scene") == scene_name
+                            and event.get("test") == test_name
+                        ):
+                            matched_event = event
+                            break
 
                 logs = []
 
@@ -1481,19 +1554,30 @@ class ItsHandler(BaseHTTPRequestHandler):
                 camera_id = query.get("camera", [""])[0]
                 scene_name = query.get("scene", [""])[0]
                 test_name = query.get("test", [""])[0]
+                run_id = query.get("run", [""])[0]
 
                 matched_event = None
 
-                for event in reversed(
-                    self.monitor.published_events
-                ):
-                    if (
-                        event.get("cameraId") == camera_id
-                        and event.get("scene") == scene_name
-                        and event.get("test") == test_name
+                run_dir = self.monitor.get_run_dir_by_id(run_id)
+                if run_dir:
+                    matched_event = self.monitor.find_event(
+                        run_dir,
+                        camera_id,
+                        scene_name,
+                        test_name,
+                    )
+
+                if not matched_event:
+                    for event in reversed(
+                        self.monitor.published_events
                     ):
-                        matched_event = event
-                        break
+                        if (
+                            event.get("cameraId") == camera_id
+                            and event.get("scene") == scene_name
+                            and event.get("test") == test_name
+                        ):
+                            matched_event = event
+                            break
 
                 if not matched_event:
                     self.send_response(404)

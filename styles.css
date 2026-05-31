@@ -272,10 +272,30 @@ h2 {
   white-space: nowrap;
 }
 
+.run-tab-separator {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 28px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(246, 244, 239, 0.7),
+    transparent
+  );
+  box-shadow: 0 0 14px rgba(97, 211, 148, 0.22);
+}
+
 .run-tab.active {
   background: var(--cyan);
   border-color: var(--cyan);
   color: #06110c;
+}
+
+.run-tab.live-run.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06110c;
+  box-shadow: 0 0 18px rgba(97, 211, 148, 0.24);
 }
 
 .run-tab.running::after {
