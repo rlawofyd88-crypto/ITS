@@ -1514,14 +1514,14 @@ class ItsHandler(BaseHTTPRequestHandler):
                 self.monitor.collect_fixed_live_logs(latest_dir)
 
             if latest_dir and live_test_running and not light_live_status:
-                file_results = self.monitor.parse_tc_results(latest_dir)
                 self.monitor.collect_live_log_updates(latest_dir)
+
+            if latest_dir and live_test_running:
+                file_results = self.monitor.get_fixed_live_results(latest_dir)
+            elif latest_dir:
+                file_results = self.monitor.get_static_tc_results(latest_dir)
             else:
-                file_results = (
-                    self.monitor.get_static_tc_results(latest_dir)
-                    if latest_dir and not live_test_running
-                    else self.monitor.get_fixed_live_results(latest_dir)
-                )
+                file_results = {}
             live_state = self.monitor.apply_live_state()
             live_test_running = self.monitor.is_live_test_running(live_state)
             camera_ids = self.monitor.get_camera_ids(latest_dir)
@@ -1582,10 +1582,8 @@ class ItsHandler(BaseHTTPRequestHandler):
                     )
                 )
 
-                if is_active_run and live_test_running and light_live_status:
+                if is_active_run and live_test_running:
                     run_results = self.monitor.get_fixed_live_results(run_dir)
-                elif is_active_run and live_test_running:
-                    run_results = file_results
                 elif should_load_run_detail:
                     run_results = self.monitor.get_fixed_live_results(run_dir)
                     if not run_results:
@@ -1839,7 +1837,7 @@ class ItsHandler(BaseHTTPRequestHandler):
                     tail_count = 0
 
                 log_data = self.monitor.get_released_log_data(since_sequence)
-                if tail_count > 0 and since_sequence <= 0:
+                if tail_count > 0:
                     log_data = log_data[-tail_count:]
                 payload = json.dumps(log_data).encode("utf-8")
                 self.send_response(200)
