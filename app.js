@@ -53,6 +53,25 @@ function formatTcName(name) {
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join('');
 }
+
+const sceneNameAliases = {
+  "scene_extensions/scene_hdr": "scene_hdr",
+  "scene_extensions/scene_low_light": "scene_low_light"
+};
+
+function normalizeSceneName(sceneName) {
+  const normalized = String(sceneName || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (sceneNameAliases[normalized]) {
+    return sceneNameAliases[normalized];
+  }
+
+  const tail = normalized.split("/").pop();
+  if (tail && itsTestStructure.some((item) => item.scene === tail)) {
+    return tail;
+  }
+
+  return normalized;
+}
 // --- CameraITS 테스트 구조 정의 ---
 let itsTestStructure = [
   {
@@ -545,10 +564,25 @@ function setBadge(status) {
 }
 
 function cloneTreeStructure(tree) {
-  return (Array.isArray(tree) ? tree : []).map((item) => ({
-    scene: item.scene,
-    tests: { ...(item.tests || {}) }
-  }));
+  const normalizedTree = [];
+  const sceneMap = new Map();
+
+  (Array.isArray(tree) ? tree : []).forEach((item) => {
+    const scene = normalizeSceneName(item.scene);
+    if (!scene) {
+      return;
+    }
+
+    if (!sceneMap.has(scene)) {
+      const nextItem = { scene, tests: {} };
+      sceneMap.set(scene, nextItem);
+      normalizedTree.push(nextItem);
+    }
+
+    Object.assign(sceneMap.get(scene).tests, item.tests || {});
+  });
+
+  return normalizedTree;
 }
 
 function getTreeSignature(tree) {
@@ -998,7 +1032,7 @@ function getActiveExecutionPlaceholder(activeExecution, capture = null) {
 
   return {
     cameraId: activeExecution.cameraId || selectedCameraId || capture?.cameraId || "",
-    scene: activeExecution.scene || capture?.scene || "",
+    scene: normalizeSceneName(activeExecution.scene || capture?.scene || ""),
     test: activeExecution.test || capture?.test || "",
     sourceDir: activeExecution.sourceDir || activeExecution.output || activeExecution.runPath || capture?.sourceDir || "",
     sequence: capture?.sequence || activeExecution.sequence || 0,
@@ -1016,7 +1050,10 @@ function getDisplayCapture(capture, activeExecution) {
     return getActiveExecutionPlaceholder(activeExecution);
   }
 
-  if (capture.scene && capture.scene !== activeExecution.scene) {
+  if (
+    capture.scene &&
+    normalizeSceneName(capture.scene) !== normalizeSceneName(activeExecution.scene)
+  ) {
     return getActiveExecutionPlaceholder(activeExecution, capture);
   }
 
@@ -1047,7 +1084,7 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
                   selectedActiveExecution.cameraId || selectedCameraId || "",
 
               scene:
-                  selectedActiveExecution.scene,
+                  normalizeSceneName(selectedActiveExecution.scene),
 
               test:
                   selectedActiveExecution.test
@@ -1063,7 +1100,7 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
 
       const sceneResults =
           selectedTree.find(
-              (item) => item.scene === selectedCapture.scene
+              (item) => item.scene === normalizeSceneName(selectedCapture.scene)
           );
 
       if (sceneResults) {
@@ -1078,7 +1115,7 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
               const alreadyQueued = pendingTcUpdates.some(
                   (item) =>
                       item.cameraId === selectedCapture.cameraId &&
-                      item.scene === selectedCapture.scene &&
+                      item.scene === normalizeSceneName(selectedCapture.scene) &&
                       item.test === selectedCapture.test
               );
 
@@ -1088,7 +1125,7 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
                           selectedCapture.cameraId,
 
                       scene:
-                          selectedCapture.scene,
+                          normalizeSceneName(selectedCapture.scene),
 
                       test:
                           selectedCapture.test,
@@ -1126,7 +1163,7 @@ function applyCaptureInfo(capture) {
   const captureKey = [
     capture.sequence || 0,
     capture.cameraId || "",
-    capture.scene || "",
+    normalizeSceneName(capture.scene),
     capture.test || "",
     capture.sourceDir || "",
     capture.updatedAt || 0,
@@ -1142,7 +1179,11 @@ function applyCaptureInfo(capture) {
   }
 
   currentCaptureKey = captureKey;
-  liveCaptureInfo = { ...capture, placeholder: false };
+  liveCaptureInfo = {
+    ...capture,
+    scene: normalizeSceneName(capture.scene),
+    placeholder: false
+  };
   if (changed) {
     liveCaptureStartedAt = Date.now();
     liveCaptureImageRequestKey = "";
@@ -1156,7 +1197,7 @@ function setPlaceholderCaptureInfo(capture = {}) {
     "placeholder",
     capture.sequence || 0,
     capture.cameraId || selectedCameraId || "",
-    capture.scene || "",
+    normalizeSceneName(capture.scene),
     capture.test || "",
     capture.sourceDir || "",
     capture.updatedAt || 0
@@ -1165,6 +1206,7 @@ function setPlaceholderCaptureInfo(capture = {}) {
   currentCaptureKey = placeholderKey;
   liveCaptureInfo = {
     ...capture,
+    scene: normalizeSceneName(capture.scene),
     available: true,
     imageCount: 1,
     placeholder: true
@@ -1257,12 +1299,12 @@ function parseLogTimestamp(text) {
 
 function isFocusedTc(sceneName, testName, cameraId = selectedCameraId) {
   return currentTcFocus.cameraId === cameraId &&
-    currentTcFocus.scene === sceneName &&
+    normalizeSceneName(currentTcFocus.scene) === normalizeSceneName(sceneName) &&
     currentTcFocus.test === testName;
 }
 
 function getCurrentTcDescription(sceneName, testName) {
-  return tcDescriptionMap?.[sceneName]?.[testName]
+  return tcDescriptionMap?.[normalizeSceneName(sceneName)]?.[testName]
     || "현재 테스트의 세부 설명을 준비 중입니다.";
 }
 
@@ -1271,7 +1313,7 @@ function updateCurrentTestGuide() {
     return;
   }
 
-  const sceneName = currentTcFocus.scene || tcOrderList[0]?.scene || "scene0";
+  const sceneName = normalizeSceneName(currentTcFocus.scene || tcOrderList[0]?.scene || "scene0");
   const testName = currentTcFocus.test || tcOrderList[0]?.test || "test_jitter";
   const order = tcOrderMap.get(`${sceneName}:${testName}`) || 1;
 
@@ -1322,7 +1364,7 @@ function applyCurrentTcFocus({ scroll = false, behavior = "smooth" } = {}) {
 
 function setCurrentTcFocus(capture, options = {}) {
   const cameraId = capture?.cameraId || selectedCameraId || "";
-  const sceneName = capture?.scene || "";
+  const sceneName = normalizeSceneName(capture?.scene || "");
   const testName = capture?.test || "";
   if (!sceneName || !testName) {
     return false;
@@ -2257,7 +2299,7 @@ async function startLogSimulation() {
                 const targetScene =
                     itsTestStructure.find(
                         (scene) =>
-                            scene.scene === nextTcUpdate.scene
+                            scene.scene === normalizeSceneName(nextTcUpdate.scene)
                     );
 
                 if (
@@ -2274,7 +2316,7 @@ async function startLogSimulation() {
                 const liveTargetScene =
                     liveTcTree.find(
                         (scene) =>
-                            scene.scene === nextTcUpdate.scene
+                            scene.scene === normalizeSceneName(nextTcUpdate.scene)
                     );
 
                 if (

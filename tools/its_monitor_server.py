@@ -79,6 +79,12 @@ DEBUG_SUMMARY_PREFIXES = (
 TEST_NAME_ALIASES = {
     ("scene1_1", "test_ae_precapture"): "test_ae_precapture_trigger",
     ("scene1_3", "test_sensor_sensitivity_priority"): "test_sensitivity_priority",
+    ("scene_hdr", "test_hdr"): "test_hdr_extension",
+    ("scene_low_light", "test_low_light_boost"): "test_low_light_boost_extension",
+}
+SCENE_NAME_ALIASES = {
+    "scene_extensions/scene_hdr": "scene_hdr",
+    "scene_extensions/scene_low_light": "scene_low_light",
 }
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 DEFAULT_CAMERA_ID = "cam_id_0"
@@ -94,7 +100,7 @@ FIXED_LIVE_LOG_CANDIDATES = (
     f"{FIXED_LIVE_LOG_PREFIX}.INFO",
 )
 LIVE_LOG_PREFIX_RE = re.compile(
-    r"^\[(?P<scene>[^\]/]+)/(?P<test>[^\]]+)\]\s*(?P<text>.*)$"
+    r"^\[(?P<scene>.+)/(?P<test>test_[^\]/\]]+(?:\.py)?)\]\s*(?P<text>.*)$"
 )
 TIMESTAMPED_TEST_DIR_RE = re.compile(
     r"^\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}-\d{3}_(?P<test>[A-Za-z0-9]+)$"
@@ -164,8 +170,22 @@ class ITSMonitor:
         except OSError:
             return 0.0
 
+    def normalize_scene_name(self, scene_name: str | None) -> str:
+        normalized = (scene_name or "").strip().strip("/")
+        normalized = normalized.replace("\\", "/")
+        if normalized in SCENE_NAME_ALIASES:
+            return SCENE_NAME_ALIASES[normalized]
+
+        tail = normalized.rsplit("/", 1)[-1]
+        if tail in SCENE_INDEX:
+            return tail
+
+        return normalized
+
     def normalize_test_name(self, scene_name: str, test_name: str) -> str:
-        return TEST_NAME_ALIASES.get((scene_name, test_name), test_name)
+        normalized_scene = self.normalize_scene_name(scene_name)
+        normalized_test = (test_name or "").replace(".py", "")
+        return TEST_NAME_ALIASES.get((normalized_scene, normalized_test), normalized_test)
 
     def camera_sort_key(self, camera_id: str):
         suffix = camera_id.replace("cam_id_", "", 1)
@@ -232,15 +252,16 @@ class ITSMonitor:
             return
 
         normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
-        normalized_test_name = self.normalize_test_name(scene_name, test_name)
-        event_key = (normalized_camera_id, scene_name, normalized_test_name)
-        if (scene_name, normalized_test_name) not in TEST_INDEX:
+        normalized_scene_name = self.normalize_scene_name(scene_name)
+        normalized_test_name = self.normalize_test_name(normalized_scene_name, test_name)
+        event_key = (normalized_camera_id, normalized_scene_name, normalized_test_name)
+        if (normalized_scene_name, normalized_test_name) not in TEST_INDEX:
             return
 
         event = {
             "cameraId": normalized_camera_id,
             "cameraLabel": normalized_camera_id,
-            "scene": scene_name,
+            "scene": normalized_scene_name,
             "test": normalized_test_name,
             "status": status,
             "completedAt": completed_at,
@@ -396,9 +417,10 @@ class ITSMonitor:
         run_key = self.fixed_live_run_key(run_dir)
         if not run_key:
             return None
-        normalized_test_name = self.normalize_test_name(scene_name, test_name)
+        normalized_scene_name = self.normalize_scene_name(scene_name)
+        normalized_test_name = self.normalize_test_name(normalized_scene_name, test_name)
         event = self.fixed_live_events_by_run.get(run_key, {}).get(
-            (camera_id or DEFAULT_CAMERA_ID, scene_name, normalized_test_name)
+            (camera_id or DEFAULT_CAMERA_ID, normalized_scene_name, normalized_test_name)
         )
         return dict(event) if event else None
 
@@ -422,21 +444,22 @@ class ITSMonitor:
 
         run_key = self.fixed_live_run_key(run_dir)
         normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
-        normalized_test_name = self.normalize_test_name(scene_name, test_name)
-        if (scene_name, normalized_test_name) not in TEST_INDEX:
+        normalized_scene_name = self.normalize_scene_name(scene_name)
+        normalized_test_name = self.normalize_test_name(normalized_scene_name, test_name)
+        if (normalized_scene_name, normalized_test_name) not in TEST_INDEX:
             return None
 
         self.fixed_live_results_by_run.setdefault(run_key, {}).setdefault(
             normalized_camera_id, {}
-        ).setdefault(scene_name, {})[normalized_test_name] = status
+        ).setdefault(normalized_scene_name, {})[normalized_test_name] = status
         self.visible_results.setdefault(normalized_camera_id, {}).setdefault(
-            scene_name, {}
+            normalized_scene_name, {}
         )[normalized_test_name] = status
 
         event = {
             "cameraId": normalized_camera_id,
             "cameraLabel": normalized_camera_id,
-            "scene": scene_name,
+            "scene": normalized_scene_name,
             "test": normalized_test_name,
             "status": status,
             "completedAt": time.time(),
@@ -444,7 +467,7 @@ class ITSMonitor:
             "artifactDir": str(artifact_dir) if artifact_dir else "",
             "logFile": str(log_file) if log_file else "",
         }
-        event_key = (normalized_camera_id, scene_name, normalized_test_name)
+        event_key = (normalized_camera_id, normalized_scene_name, normalized_test_name)
         self.fixed_live_events_by_run.setdefault(run_key, {})[event_key] = event
         self.current_event = event
         self.current_events_by_camera[normalized_camera_id] = event
@@ -618,7 +641,11 @@ class ITSMonitor:
             return
 
         normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
-        normalized_test_name = test_name.replace(".py", "")
+        normalized_scene_name = self.normalize_scene_name(scene_name)
+        normalized_test_name = self.normalize_test_name(
+            normalized_scene_name,
+            test_name.replace(".py", ""),
+        )
 
         if (
             self.last_emitted_log_camera_id
@@ -630,7 +657,7 @@ class ITSMonitor:
                 "id": f"camera:{self.log_sequence}:{normalized_camera_id}",
                 "sequence": self.log_sequence,
                 "cameraId": normalized_camera_id,
-                "scene": scene_name,
+                "scene": normalized_scene_name,
                 "test": normalized_test_name,
                 "text": f"--- CAMERA_CHANGED_{normalized_camera_id} ---",
             })
@@ -639,10 +666,10 @@ class ITSMonitor:
         self.log_sequence += 1
         self.log_entries.append({
             "type": entry_type,
-            "id": f"log:{self.log_sequence}:{normalized_camera_id}:{scene_name}:{normalized_test_name}",
+            "id": f"log:{self.log_sequence}:{normalized_camera_id}:{normalized_scene_name}:{normalized_test_name}",
             "sequence": self.log_sequence,
             "cameraId": normalized_camera_id,
-            "scene": scene_name,
+            "scene": normalized_scene_name,
             "test": normalized_test_name,
             "text": text,
         })
@@ -658,13 +685,14 @@ class ITSMonitor:
             return
 
         normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
+        normalized_scene_name = self.normalize_scene_name(scene_name)
         normalized_test_name = self.normalize_test_name(
-            scene_name, test_name.replace(".py", "")
+            normalized_scene_name, test_name.replace(".py", "")
         )
         execution = {
             "cameraId": normalized_camera_id,
             "cameraLabel": normalized_camera_id,
-            "scene": scene_name,
+            "scene": normalized_scene_name,
             "test": normalized_test_name,
             "sourceDir": str(artifact_dir) if artifact_dir else "",
             "updatedAt": time.time(),
@@ -679,13 +707,14 @@ class ITSMonitor:
         test_name: str,
     ) -> None:
         normalized_camera_id = camera_id or DEFAULT_CAMERA_ID
+        normalized_scene_name = self.normalize_scene_name(scene_name)
         normalized_test_name = self.normalize_test_name(
-            scene_name, test_name.replace(".py", "")
+            normalized_scene_name, test_name.replace(".py", "")
         )
         execution = self.active_executions_by_camera.get(normalized_camera_id)
         if (
             execution
-            and execution.get("scene") == scene_name
+            and execution.get("scene") == normalized_scene_name
             and execution.get("test") == normalized_test_name
         ):
             self.active_executions_by_camera.pop(normalized_camera_id, None)
@@ -693,7 +722,7 @@ class ITSMonitor:
         if (
             self.active_execution
             and self.active_execution.get("cameraId") == normalized_camera_id
-            and self.active_execution.get("scene") == scene_name
+            and self.active_execution.get("scene") == normalized_scene_name
             and self.active_execution.get("test") == normalized_test_name
         ):
             self.active_execution = max(
@@ -970,6 +999,20 @@ class ITSMonitor:
                     end_match.group("returncode")
                 )
                 if is_target_run:
+                    normalized_scene_name = self.normalize_scene_name(scene_name)
+                    normalized_test_name = self.normalize_test_name(
+                        normalized_scene_name,
+                        test_name,
+                    )
+                    existing_status = (
+                        self.fixed_live_results_by_run
+                        .get(self.fixed_live_run_key(run_dir), {})
+                        .get(camera_id or DEFAULT_CAMERA_ID, {})
+                        .get(normalized_scene_name, {})
+                        .get(normalized_test_name, 0)
+                    )
+                    if status == self.status_map["PASS"] and existing_status:
+                        status = existing_status
                     self.remember_fixed_live_result(
                         run_dir,
                         camera_id,
@@ -1515,20 +1558,21 @@ class ITSMonitor:
         scene_name: str,
         test_name: str,
     ) -> Dict[str, Any] | None:
+        normalized_scene_name = self.normalize_scene_name(scene_name)
         fixed_event = self.get_fixed_live_event(
             its_dir,
             camera_id,
-            scene_name,
+            normalized_scene_name,
             test_name,
         )
         if fixed_event:
             return fixed_event
 
-        normalized_test_name = self.normalize_test_name(scene_name, test_name)
+        normalized_test_name = self.normalize_test_name(normalized_scene_name, test_name)
         for event in reversed(self.discover_tc_result_events(its_dir)):
             if (
                 event.get("cameraId") == camera_id
-                and event.get("scene") == scene_name
+                and event.get("scene") == normalized_scene_name
                 and event.get("test") == normalized_test_name
             ):
                 return event
