@@ -29,15 +29,27 @@
           </div>
         </section>
         <section class="status-strip" aria-label="demo status">
-          <button class="launcher-button" onclick="location.href='itsbox://run-dashboard'">
-              START DASHBOARD
-          </button>
-          <button class="launcher-button" onclick="location.href='itsbox://run-itstest'">
+          <div class="status-title-row">
+            <span class="status-dot"></span>
+            <strong>GMS Certification Ready Flow</strong>
+            <span id="clock">--:--:--</span>
+          </div>
+          <div class="status-actions">
+            <button
+              class="launcher-button dashboard-toggle-button"
+              id="dashboardToggleButton"
+              type="button"
+              aria-label="Start dashboard"
+              aria-pressed="false"
+              title="Start dashboard"
+            >
+              <span class="dashboard-icon dashboard-icon-play" aria-hidden="true"></span>
+              <span class="dashboard-icon dashboard-icon-stop" aria-hidden="true"></span>
+            </button>
+            <button class="launcher-button test-run-button" onclick="location.href='itsbox://run-itstest'">
               Run Google Its Test
-          </button>
-          <span class="status-dot"></span>
-          <strong>GMS Certification Ready Flow</strong>
-          <span id="clock">--:--:--</span>
+            </button>
+          </div>
         </section>
       </header>
 

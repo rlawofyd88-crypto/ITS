@@ -156,8 +156,9 @@ h2 {
 }
 
 h1 {
-  font-size: clamp(34px, 3.15vw, 58px);
+  font-size: clamp(32px, 2.28vw, 44px);
   line-height: 1;
+  white-space: nowrap;
 }
 
 .brand-heading > div:last-child {
@@ -168,18 +169,19 @@ h1 {
 .brand-title-line {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
 .brand-title-line h1 {
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .android-title-logo {
   flex: 0 0 auto;
-  width: clamp(44px, 3.4vw, 66px);
-  height: clamp(44px, 3.4vw, 66px);
+  width: clamp(42px, 3vw, 58px);
+  height: clamp(42px, 3vw, 58px);
   object-fit: contain;
   filter:
     drop-shadow(0 0 12px rgba(97, 211, 148, 0.38))
@@ -193,19 +195,46 @@ h2 {
 
 .status-strip {
   grid-column: 3;
-  min-width: 370px;
-  display: flex;
+  min-width: 334px;
+  display: grid;
+  grid-template-rows: auto auto;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 13px 15px;
+  justify-items: start;
+  gap: 6px;
+  padding: 7px 13px 8px;
   border: 1px solid var(--panel-line);
   background: rgba(246, 244, 239, 0.07);
 }
 
+.status-title-row,
+.status-actions {
+  display: flex;
+  align-items: center;
+}
+
+.status-title-row {
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.status-title-row strong {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.status-title-row #clock {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-actions {
+  gap: 8px;
+}
+
 .status-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 24px var(--accent);
@@ -1009,8 +1038,8 @@ input[type="range"] {
 }
 
 .launcher-button {
-  height: 38px;
-  padding: 0 18px;
+  height: 30px;
+  padding: 0 13px;
 
   border: 1px solid rgba(121, 215, 255, 0.35);
   border-radius: 6px;
@@ -1018,8 +1047,10 @@ input[type="range"] {
   background: rgba(121, 215, 255, 0.12);
   color: #dff7ff;
 
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 
   cursor: pointer;
 
@@ -1027,6 +1058,56 @@ input[type="range"] {
       background 0.18s ease,
       border-color 0.18s ease,
       transform 0.18s ease;
+}
+
+.dashboard-toggle-button {
+  width: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  letter-spacing: 0;
+}
+
+.dashboard-icon {
+  display: block;
+  color: currentColor;
+}
+
+.dashboard-icon-play {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 11px solid currentColor;
+  filter: drop-shadow(0 0 8px rgba(121, 215, 255, 0.35));
+}
+
+.dashboard-icon-stop {
+  display: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: currentColor;
+  box-shadow: 0 0 12px rgba(97, 211, 148, 0.36);
+}
+
+.dashboard-toggle-button.running .dashboard-icon-play {
+  display: none;
+}
+
+.dashboard-toggle-button.running .dashboard-icon-stop {
+  display: block;
+}
+
+.dashboard-toggle-button.running {
+  border-color: rgba(97, 211, 148, 0.72);
+  background: rgba(97, 211, 148, 0.2);
+  color: #eafff1;
+}
+
+.test-run-button {
+  min-width: 156px;
 }
 
 .launcher-button:hover {

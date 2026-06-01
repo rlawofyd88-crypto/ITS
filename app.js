@@ -35,12 +35,36 @@ const currentTestName = document.querySelector("#currentTestName");
 const currentTestOrder = document.querySelector("#currentTestOrder");
 const currentTestDescription = document.querySelector("#currentTestDescription");
 const logFilterGroup = document.querySelector("#logFilterGroup");
+const dashboardToggleButton = document.querySelector("#dashboardToggleButton");
 
 let tcLogTabs = [];
 
 let currentCaptureTabKey = "";
+let dashboardServerRunning = false;
 
 const MAX_TC_LOG_TABS = 5;
+
+function updateDashboardToggleButton() {
+  if (!dashboardToggleButton) {
+    return;
+  }
+
+  dashboardToggleButton.classList.toggle("running", dashboardServerRunning);
+  dashboardToggleButton.setAttribute("aria-pressed", dashboardServerRunning ? "true" : "false");
+  dashboardToggleButton.setAttribute(
+    "aria-label",
+    dashboardServerRunning ? "Stop dashboard" : "Start dashboard"
+  );
+  dashboardToggleButton.title = dashboardServerRunning ? "Stop dashboard" : "Start dashboard";
+}
+
+function toggleDashboardServer() {
+  dashboardServerRunning = !dashboardServerRunning;
+  updateDashboardToggleButton();
+  location.href = dashboardServerRunning
+    ? "itsbox://run-dashboard"
+    : "itsbox://stop-dashboard";
+}
 
 /**
  * 스네이크 케이스(test_example_name)를 파스칼 케이스(ExampleName)로 변환합니다.
@@ -2349,6 +2373,8 @@ async function startLogSimulation() {
 
 function init() {
   updateClock();
+  updateDashboardToggleButton();
+  dashboardToggleButton?.addEventListener("click", toggleDashboardServer);
   renderTcTree();
   updateMetrics();
   updateCurrentTestGuide();
