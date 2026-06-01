@@ -35,35 +35,17 @@ const currentTestName = document.querySelector("#currentTestName");
 const currentTestOrder = document.querySelector("#currentTestOrder");
 const currentTestDescription = document.querySelector("#currentTestDescription");
 const logFilterGroup = document.querySelector("#logFilterGroup");
-const dashboardToggleButton = document.querySelector("#dashboardToggleButton");
 
 let tcLogTabs = [];
 
 let currentCaptureTabKey = "";
-let dashboardServerRunning = false;
 
 const MAX_TC_LOG_TABS = 5;
 
-function updateDashboardToggleButton() {
-  if (!dashboardToggleButton) {
-    return;
+function setLiveBadgeText(text) {
+  if (liveBadge) {
+    liveBadge.textContent = text;
   }
-
-  dashboardToggleButton.classList.toggle("running", dashboardServerRunning);
-  dashboardToggleButton.setAttribute("aria-pressed", dashboardServerRunning ? "true" : "false");
-  dashboardToggleButton.setAttribute(
-    "aria-label",
-    dashboardServerRunning ? "Stop dashboard" : "Start dashboard"
-  );
-  dashboardToggleButton.title = dashboardServerRunning ? "Stop dashboard" : "Start dashboard";
-}
-
-function toggleDashboardServer() {
-  dashboardServerRunning = !dashboardServerRunning;
-  updateDashboardToggleButton();
-  location.href = dashboardServerRunning
-    ? "itsbox://run-dashboard"
-    : "itsbox://stop-dashboard";
 }
 
 /**
@@ -1180,7 +1162,7 @@ function applySelectedCameraData({ data = {}, scrollFocusedTc = false } = {}) {
 function applyCaptureInfo(capture) {
   if (!capture) {
     const changed = setPlaceholderCaptureInfo({});
-    liveBadge.textContent = "WAIT";
+    setLiveBadgeText("WAIT");
     return changed;
   }
 
@@ -1198,7 +1180,7 @@ function applyCaptureInfo(capture) {
 
   if (!capture.available) {
     const placeholderChanged = setPlaceholderCaptureInfo(capture);
-    liveBadge.textContent = capture.test ? "NO IMG" : "WAIT";
+    setLiveBadgeText(capture.test ? "NO IMG" : "WAIT");
     return placeholderChanged;
   }
 
@@ -1212,7 +1194,7 @@ function applyCaptureInfo(capture) {
     liveCaptureStartedAt = Date.now();
     liveCaptureImageRequestKey = "";
   }
-  liveBadge.textContent = "CAPTURE";
+  setLiveBadgeText("CAPTURE");
   return changed;
 }
 
@@ -1290,9 +1272,7 @@ function showLiveCapturePlaceholder() {
 
 function showDefaultLiveCapture(statusText = "WAIT") {
   setPlaceholderCaptureInfo({});
-  if (liveBadge) {
-    liveBadge.textContent = statusText;
-  }
+  setLiveBadgeText(statusText);
   showLiveCapturePlaceholder();
 }
 
@@ -2373,8 +2353,6 @@ async function startLogSimulation() {
 
 function init() {
   updateClock();
-  updateDashboardToggleButton();
-  dashboardToggleButton?.addEventListener("click", toggleDashboardServer);
   renderTcTree();
   updateMetrics();
   updateCurrentTestGuide();
