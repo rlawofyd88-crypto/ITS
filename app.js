@@ -595,12 +595,34 @@ function getTreeSignature(tree) {
   return JSON.stringify(tree);
 }
 
-function rememberHistoryTcTree(runId, tree, signature = getTreeSignature(tree)) {
+function getHistoryTcTreeKey(runId = getHistoryTcRunId(), cameraId = selectedCameraId) {
+  return `${runId || "waiting"}:${cameraId || "default"}`;
+}
+
+function rememberHistoryTcTree(
+  runId,
+  tree,
+  signature = getTreeSignature(tree),
+  cameraId = selectedCameraId
+) {
   if (!runId) {
     return;
   }
-  historyTcTrees[runId] = cloneTreeStructure(tree);
-  historyTcTreeSignatures[runId] = signature;
+  const historyKey = getHistoryTcTreeKey(runId, cameraId);
+  historyTcTrees[historyKey] = cloneTreeStructure(tree);
+  historyTcTreeSignatures[historyKey] = signature;
+}
+
+function rememberHistoryCameraTrees(runId, treesByCamera) {
+  if (!runId || !treesByCamera || typeof treesByCamera !== "object") {
+    return;
+  }
+
+  Object.entries(treesByCamera).forEach(([cameraId, tree]) => {
+    if (Array.isArray(tree) && tree.length) {
+      rememberHistoryTcTree(runId, tree, getTreeSignature(tree), cameraId);
+    }
+  });
 }
 
 function resetLiveTcTreeForRun(nextRunId) {
@@ -634,14 +656,17 @@ function getVisibleStoredTcTree() {
   if (getTcListMode() === "live") {
     return liveTcTree;
   }
-  return historyTcTrees[getHistoryTcRunId()] || defaultItsTestStructure;
+  return historyTcTrees[getHistoryTcTreeKey()]
+    || historyTcTrees[getHistoryTcRunId()]
+    || defaultItsTestStructure;
 }
 
 function getVisibleStoredTcSignature() {
   if (getTcListMode() === "live") {
     return liveTcTreeSignature;
   }
-  return historyTcTreeSignatures[getHistoryTcRunId()]
+  return historyTcTreeSignatures[getHistoryTcTreeKey()]
+    || historyTcTreeSignatures[getHistoryTcRunId()]
     || getTreeSignature(defaultItsTestStructure);
 }
 
@@ -682,7 +707,9 @@ function getActiveRunTreeFromData(data) {
 
 function renderStoredTcTree({ force = false } = {}) {
   const visibleMode = getTcListMode();
-  const visibleRunId = visibleMode === "live" ? (activeRunId || selectedRunId) : getHistoryTcRunId();
+  const visibleRunId = visibleMode === "live"
+    ? (activeRunId || selectedRunId)
+    : getHistoryTcTreeKey();
   const visibleSignature = `${visibleMode}:${visibleRunId}:${getVisibleStoredTcSignature()}`;
 
   if (!force && visibleSignature === currentTreeSignature) {
@@ -795,6 +822,9 @@ function renderRunTabs() {
         : (runCameraAnalyses[selectedRunId] || {});
       cameraCaptures = {};
       cameraActiveExecutions = {};
+      if (!selectedRunIsActive) {
+        rememberHistoryCameraTrees(selectedRunId, cameraTrees);
+      }
       renderRunTabs();
       applySelectedRunBadge();
       renderCameraTabs();
@@ -975,6 +1005,10 @@ function applyCameraState(data, { followActive = false } = {}) {
     || (selectedRunIsActive ? (data.cameraAnalysis || {}) : {});
   cameraCaptures = selectedRunIsActive ? (data.cameraCaptures || {}) : {};
   cameraActiveExecutions = selectedRunIsActive ? (data.cameraActiveExecutions || {}) : {};
+
+  if (!selectedRunIsActive) {
+    rememberHistoryCameraTrees(selectedRunId, cameraTrees);
+  }
 
   if (!selectedCameraId || !nextCameraIds.includes(selectedCameraId)) {
     selectedCameraId = activeCameraId || nextCameraIds[0] || "";
