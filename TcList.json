@@ -1,0 +1,202 @@
+[
+  {
+    "scene": "scene0",
+    "tests": [
+      "test_jitter : 1",
+      "test_metadata : 1",
+      "test_request_capture_match : 1",
+      "test_sensor_events : 1",
+      "test_solid_color_test_pattern : 1",
+      "test_test_patterns : 1",
+      "test_tonemap_curve : 1",
+      "test_unified_timestamps : 1",
+      "test_vibration_restriction : 1"
+    ]
+  },
+  {
+    "scene": "scene1_1",
+    "tests": [
+      "test_ae_precapture_trigger : 1",
+      "test_auto_vs_manual : 1",
+      "test_black_white : 1",
+      "test_burst_capture : 1",
+      "test_burst_sameness_manual : 1",
+      "test_crop_region_raw : 1",
+      "test_crop_regions : 1",
+      "test_exposure_x_iso : 1",
+      "test_latching : 1",
+      "test_linearity : 1",
+      "test_locked_burst : 1"
+    ]
+  },
+  {
+    "scene": "scene1_2",
+    "tests": [
+      "test_param_color_correction : 1",
+      "test_param_flash_mode : 1",
+      "test_param_noise_reduction : 1",
+      "test_param_shading_mode : 1",
+      "test_param_tonemap_mode : 1",
+      "test_post_raw_sensitivity_boost : 1",
+      "test_raw_exposure : 1",
+      "test_reprocess_noise_reduction : 1",
+      "test_tonemap_sequence : 1",
+      "test_yuv_plus_dng : 1"
+    ]
+  },
+  {
+    "scene": "scene1_3",
+    "tests": [
+      "test_capture_result : 1",
+      "test_dng_noise_model : 1",
+      "test_ev_compensation : 1",
+      "test_exposure_time_priority : 1",
+      "test_jpeg : 1",
+      "test_raw_burst_sensitivity : 1",
+      "test_raw_sensitivity : 1",
+      "test_sensitivity_priority : 1",
+      "test_yuv_jpeg_all : 1",
+      "test_yuv_plus_jpeg : 1",
+      "test_yuv_plus_raw : 1"
+    ]
+  },
+  {
+    "scene": "scene2_a",
+    "tests": [
+      "test_display_p3 : 1",
+      "test_effects : 1",
+      "test_exposure_keys_consistent : 1",
+      "test_format_combos : 1",
+      "test_num_faces : 1",
+      "test_reprocess_uv_swap : 1"
+    ]
+  },
+  {
+    "scene": "scene2_b",
+    "tests": [
+      "test_preview_num_faces : 1",
+      "test_yuv_jpeg_capture_sameness : 1"
+    ]
+  },
+  {
+    "scene": "scene2_c",
+    "tests": [
+      "test_camera_launch_perf_class : 1",
+      "test_default_camera_hdr : 1",
+      "test_jpeg_capture_perf_class : 1",
+      "test_num_faces : 1"
+    ]
+  },
+  {
+    "scene": "scene2_d",
+    "tests": [
+      "test_autoframing : 1",
+      "test_num_faces : 1",
+      "test_preview_num_faces : 1"
+    ]
+  },
+  {
+    "scene": "scene2_e",
+    "tests": [
+      "test_continuous_picture : 1",
+      "test_num_faces : 1"
+    ]
+  },
+  {
+    "scene": "scene2_f",
+    "tests": [
+      "test_preview_num_faces : 1"
+    ]
+  },
+  {
+    "scene": "scene2_g",
+    "tests": [
+      "test_preview_num_faces : 1"
+    ]
+  },
+  {
+    "scene": "scene3",
+    "tests": [
+      "test_edge_enhancement : 1",
+      "test_flip_mirror : 1",
+      "test_imu_drift : 1",
+      "test_landscape_to_portrait : 1",
+      "test_lens_movement_reporting : 1",
+      "test_reprocess_edge_enhancement : 1"
+    ]
+  },
+  {
+    "scene": "scene4",
+    "tests": [
+      "test_30_60fps_preview_fov_match : 1",
+      "test_aspect_ratio_and_crop : 1",
+      "test_multi_camera_alignment : 1",
+      "test_preview_aspect_ratio_and_crop : 1",
+      "test_preview_stabilization_fov : 1",
+      "test_video_aspect_ratio_and_crop : 1"
+    ]
+  },
+  {
+    "scene": "scene6",
+    "tests": [
+      "test_in_sensor_zoom : 1",
+      "test_low_latency_zoom : 1",
+      "test_preview_video_zoom_match : 1",
+      "test_preview_zoom : 1",
+      "test_session_characteristics_zoom : 1",
+      "test_zoom : 1"
+    ]
+  },
+  {
+    "scene": "scene7",
+    "tests": [
+      "test_multi_camera_switch : 1"
+    ]
+  },
+  {
+    "scene": "scene8",
+    "tests": [
+      "test_ae_awb_regions : 1",
+      "test_color_correction_mode_cct : 1"
+    ]
+  },
+  {
+    "scene": "scene9",
+    "tests": [
+      "test_jpeg_high_entropy : 1",
+      "test_jpeg_quality : 1"
+    ]
+  },
+  {
+    "scene": "scene_hdr",
+    "tests": [
+      "test_hdr_extension : 1"
+    ]
+  },
+  {
+    "scene": "scene_low_light",
+    "tests": [
+      "test_low_light_boost_extension : 1",
+      "test_night_extension : 1"
+    ]
+  },
+  {
+    "scene": "scene6_tele",
+    "tests": [
+      "test_preview_zoom_tele : 1",
+      "test_zoom_tele : 1"
+    ]
+  },
+  {
+    "scene": "scene7_tele",
+    "tests": [
+      "test_multi_camera_switch_tele : 1"
+    ]
+  },
+  {
+    "scene": "scene_video",
+    "tests": [
+      "test_preview_frame_drop : 1"
+    ]
+  }
+]

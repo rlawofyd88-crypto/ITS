@@ -78,209 +78,8 @@ function normalizeSceneName(sceneName) {
 
   return normalized;
 }
-// --- CameraITS 테스트 구조 정의 ---
-let itsTestStructure = [
-  {
-    scene: "scene0",
-    tests: {
-      test_jitter: 0,
-      test_metadata: 0,
-      test_request_capture_match: 0,
-      test_sensor_events: 0,
-      test_solid_color_test_pattern: 0,
-      test_test_patterns: 0,
-      test_tonemap_curve: 0,
-      test_unified_timestamps: 0,
-      test_vibration_restriction: 0
-    }
-  },
-  {
-    scene: "scene1_1",
-    tests: {
-      test_ae_precapture_trigger: 0,
-      test_auto_vs_manual: 0,
-      test_black_white: 0,
-      test_burst_capture: 0,
-      test_burst_sameness_manual: 0,
-      test_crop_region_raw: 0,
-      test_crop_regions: 0,
-      test_exposure_x_iso: 0,
-      test_latching: 0,
-      test_linearity: 0,
-      test_locked_burst: 0
-    }
-  },
-  {
-    scene: "scene1_2",
-    tests: {
-      test_param_color_correction: 0,
-      test_param_flash_mode: 0,
-      test_param_noise_reduction: 0,
-      test_param_shading_mode: 0,
-      test_param_tonemap_mode: 0,
-      test_post_raw_sensitivity_boost: 0,
-      test_raw_exposure: 0,
-      test_reprocess_noise_reduction: 0,
-      test_tonemap_sequence: 0,
-      test_yuv_plus_dng: 0
-    }
-  },
-  {
-    scene: "scene1_3",
-    tests: {
-      test_capture_result: 0,
-      test_dng_noise_model: 0,
-      test_ev_compensation: 0,
-      test_exposure_time_priority: 0,
-      test_jpeg: 0,
-      test_raw_burst_sensitivity: 0,
-      test_raw_sensitivity: 0,
-      test_sensitivity_priority: 0,
-      test_yuv_jpeg_all: 0,
-      test_yuv_plus_jpeg: 0,
-      test_yuv_plus_raw: 0
-    }
-  },
-  {
-    scene: "scene2_a",
-    tests: {
-      test_display_p3: 0,
-      test_effects: 0,
-      test_exposure_keys_consistent: 0,
-      test_format_combos: 0,
-      test_num_faces: 0,
-      test_reprocess_uv_swap: 0
-    }
-  },
-  {
-    scene: "scene2_b",
-    tests: {
-      test_preview_num_faces: 0,
-      test_yuv_jpeg_capture_sameness: 0
-    }
-  },
-  {
-    scene: "scene2_c",
-    tests: {
-      test_camera_launch_perf_class: 0,
-      test_default_camera_hdr: 0,
-      test_jpeg_capture_perf_class: 0,
-      test_num_faces: 0
-    }
-  },
-  {
-    scene: "scene2_d",
-    tests: {
-      test_autoframing: 0,
-      test_num_faces: 0,
-      test_preview_num_faces: 0
-    }
-  },
-  {
-    scene: "scene2_e",
-    tests: {
-      test_continuous_picture: 0,
-      test_num_faces: 0
-    }
-  },
-  {
-    scene: "scene2_f",
-    tests: {
-      test_preview_num_faces: 0
-    }
-  },
-  {
-    scene: "scene2_g",
-    tests: {
-      test_preview_num_faces: 0
-    }
-  },
-  {
-    scene: "scene3",
-    tests: {
-      test_edge_enhancement: 0,
-      test_flip_mirror: 0,
-      test_imu_drift: 0,
-      test_landscape_to_portrait: 0,
-      test_lens_movement_reporting: 0,
-      test_reprocess_edge_enhancement: 0
-    }
-  },
-  {
-    scene: "scene4",
-    tests: {
-      test_30_60fps_preview_fov_match: 0,
-      test_aspect_ratio_and_crop: 0,
-      test_multi_camera_alignment: 0,
-      test_preview_aspect_ratio_and_crop: 0,
-      test_preview_stabilization_fov: 0,
-      test_video_aspect_ratio_and_crop: 0
-    }
-  },
-  {
-    scene: "scene6",
-    tests: {
-      test_in_sensor_zoom: 0,
-      test_low_latency_zoom: 0,
-      test_preview_video_zoom_match: 0,
-      test_preview_zoom: 0,
-      test_session_characteristics_zoom: 0,
-      test_zoom: 0
-    }
-  },
-  {
-    scene: "scene7",
-    tests: {
-      test_multi_camera_switch: 0
-    }
-  },
-  {
-    scene: "scene8",
-    tests: {
-      test_ae_awb_regions: 0,
-      test_color_correction_mode_cct: 0
-    }
-  },
-  {
-    scene: "scene9",
-    tests: {
-      test_jpeg_high_entropy: 0,
-      test_jpeg_quality: 0
-    }
-  },
-  {
-    scene: "scene_hdr",
-    tests: {
-      test_hdr_extension: 0
-    }
-  },
-  {
-    scene: "scene_low_light",
-    tests: {
-      test_low_light_boost_extension: 0,
-      test_night_extension: 0
-    }
-  },
-  {
-    scene: "scene6_tele",
-    tests: {
-      test_preview_zoom_tele: 0,
-      test_zoom_tele: 0
-    }
-  },
-  {
-    scene: "scene7_tele",
-    tests: {
-      test_multi_camera_switch_tele: 0
-    }
-  },
-  {
-    scene: "scene_video",
-    tests: {
-      test_preview_frame_drop: 0
-    }
-  }
-];
+// TC structure is supplied by the monitor server from TcList.json.
+let itsTestStructure = [];
 
 const tcDescriptionMap = {
   scene0: {
@@ -419,21 +218,11 @@ const tcDescriptionMap = {
   }
 };
 
-const tcOrderList = itsTestStructure.flatMap((item) =>
-  Object.keys(item.tests).map((testName) => ({
-    scene: item.scene,
-    test: testName
-  }))
-);
-const tcOrderMap = new Map(
-  tcOrderList.map((entry, index) => [
-    `${entry.scene}:${entry.test}`,
-    index + 1
-  ])
-);
-const totalTcCount = tcOrderList.length;
-const defaultItsTestStructure = cloneTreeStructure(itsTestStructure);
-const defaultTcTreeSignature = JSON.stringify(defaultItsTestStructure);
+let tcOrderList = [];
+let tcOrderMap = new Map();
+let totalTcCount = 0;
+let defaultItsTestStructure = [];
+let defaultTcTreeSignature = "[]";
 
 let needsClear = false;
 let externalDataActive = false;
@@ -569,6 +358,69 @@ function setBadge(status) {
   resultBadge.classList.toggle("running", normalized !== "PASS" && normalized !== "FAIL");
 }
 
+function parseTcListEnabled(value, defaultValue = true) {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) {
+    return defaultValue;
+  }
+  if (["1", "true", "yes", "y", "on", "enable", "enabled", "use", "used"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "n", "off", "disable", "disabled", "unused"].includes(normalized)) {
+    return false;
+  }
+  return defaultValue;
+}
+
+function parseTcListArrayEntry(entry) {
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    return {
+      name: String(entry.test || entry.name || entry.id || "").trim(),
+      enabled: parseTcListEnabled(entry.enabled ?? entry.use ?? entry.active, true)
+    };
+  }
+
+  const rawEntry = String(entry || "").trim();
+  if (rawEntry.includes(":")) {
+    const separatorIndex = rawEntry.lastIndexOf(":");
+    return {
+      name: rawEntry.slice(0, separatorIndex).trim(),
+      enabled: parseTcListEnabled(rawEntry.slice(separatorIndex + 1), true)
+    };
+  }
+
+  return { name: rawEntry, enabled: true };
+}
+
+function normalizeTestStatusMap(tests) {
+  if (Array.isArray(tests)) {
+    return tests.reduce((statusMap, testName) => {
+      const parsedEntry = parseTcListArrayEntry(testName);
+      if (parsedEntry.name && parsedEntry.enabled) {
+        statusMap[parsedEntry.name] = 0;
+      }
+      return statusMap;
+    }, {});
+  }
+
+  return Object.fromEntries(
+    Object.entries(tests || {}).map(([testName, statusValue]) => [
+      testName,
+      Number(statusValue) || 0
+    ])
+  );
+}
+
 function cloneTreeStructure(tree) {
   const normalizedTree = [];
   const sceneMap = new Map();
@@ -585,7 +437,7 @@ function cloneTreeStructure(tree) {
       normalizedTree.push(nextItem);
     }
 
-    Object.assign(sceneMap.get(scene).tests, item.tests || {});
+    Object.assign(sceneMap.get(scene).tests, normalizeTestStatusMap(item.tests));
   });
 
   return normalizedTree;
@@ -593,6 +445,57 @@ function cloneTreeStructure(tree) {
 
 function getTreeSignature(tree) {
   return JSON.stringify(tree);
+}
+
+function rebuildTcOrderIndex() {
+  tcOrderList = defaultItsTestStructure.flatMap((item) =>
+    Object.keys(item.tests).map((testName) => ({
+      scene: item.scene,
+      test: testName
+    }))
+  );
+  tcOrderMap = new Map(
+    tcOrderList.map((entry, index) => [
+      `${entry.scene}:${entry.test}`,
+      index + 1
+    ])
+  );
+  totalTcCount = tcOrderList.length;
+}
+
+function applyServerTestStructure(testStructure) {
+  const nextDefaultTree = cloneTreeStructure(testStructure);
+  if (!nextDefaultTree.length) {
+    return false;
+  }
+
+  const nextSignature = getTreeSignature(nextDefaultTree);
+  if (nextSignature === defaultTcTreeSignature) {
+    return false;
+  }
+
+  itsTestStructure = cloneTreeStructure(nextDefaultTree);
+  defaultItsTestStructure = cloneTreeStructure(nextDefaultTree);
+  defaultTcTreeSignature = nextSignature;
+  rebuildTcOrderIndex();
+
+  liveTcTree = cloneTreeStructure(defaultItsTestStructure);
+  liveTcTreeSignature = defaultTcTreeSignature;
+  liveTcRunId = "";
+  historyTcTrees = {};
+  historyTcTreeSignatures = {};
+  currentTreeSignature = "";
+  pendingTcUpdates = [];
+
+  const focusKey = `${normalizeSceneName(currentTcFocus.scene)}:${currentTcFocus.test}`;
+  if (!tcOrderMap.has(focusKey)) {
+    const firstTc = tcOrderList[0];
+    currentTcFocus = firstTc
+      ? { cameraId: selectedCameraId || "", scene: firstTc.scene, test: firstTc.test }
+      : { cameraId: "", scene: "", test: "" };
+  }
+
+  return true;
 }
 
 function getHistoryTcTreeKey(runId = getHistoryTcRunId(), cameraId = selectedCameraId) {
@@ -1351,12 +1254,13 @@ function updateCurrentTestGuide() {
     return;
   }
 
-  const sceneName = normalizeSceneName(currentTcFocus.scene || tcOrderList[0]?.scene || "scene0");
-  const testName = currentTcFocus.test || tcOrderList[0]?.test || "test_jitter";
-  const order = tcOrderMap.get(`${sceneName}:${testName}`) || 1;
+  const fallbackTc = tcOrderList[0] || { scene: "", test: "" };
+  const sceneName = normalizeSceneName(currentTcFocus.scene || fallbackTc.scene);
+  const testName = currentTcFocus.test || fallbackTc.test;
+  const order = tcOrderMap.get(`${sceneName}:${testName}`) || (totalTcCount ? 1 : 0);
 
-  currentTestScene.textContent = sceneName;
-  currentTestName.textContent = formatTcName(testName);
+  currentTestScene.textContent = sceneName || "-";
+  currentTestName.textContent = testName ? formatTcName(testName) : "Waiting";
   currentTestOrder.textContent = `( ${order} / ${totalTcCount} )`;
   currentTestDescription.textContent = getCurrentTcDescription(sceneName, testName);
 }
@@ -2068,6 +1972,7 @@ async function showTcCaptureTab(
 
 function applyDashboardData(data, { scrollFocusedTc = false, followActiveCamera = false } = {}) {
   latestDashboardData = data;
+  applyServerTestStructure(data.testStructure);
   applyRunInfo(data.run);
   applyCameraState(data, { followActive: followActiveCamera });
   setLiveSyncEnabled(isLiveSyncData(data));

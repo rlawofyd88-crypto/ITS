@@ -15,6 +15,7 @@ from typing import Any, List, Dict
 from urllib.parse import parse_qs, urlparse
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("its_monitor_server.cfg")
+DEFAULT_TC_LIST_PATH = Path(__file__).resolve().parents[1] / "TcList.json"
 DEFAULT_SERVER_CONFIG = {
     "results_dir": "/tmp",
     "its_tools": "",
@@ -22,38 +23,10 @@ DEFAULT_SERVER_CONFIG = {
     "replay_interval": "0.5",
 }
 
-MASTER_STRUCTURE = [
-    {"scene": "scene0", "tests": ["test_jitter", "test_metadata", "test_request_capture_match", "test_sensor_events", "test_solid_color_test_pattern", "test_test_patterns", "test_tonemap_curve", "test_unified_timestamps", "test_vibration_restriction"]},
-    {"scene": "scene1_1", "tests": ["test_ae_precapture_trigger", "test_auto_vs_manual", "test_black_white", "test_burst_capture", "test_burst_sameness_manual", "test_crop_region_raw", "test_crop_regions", "test_exposure_x_iso", "test_latching", "test_linearity", "test_locked_burst"]},
-    {"scene": "scene1_2", "tests": ["test_param_color_correction", "test_param_flash_mode", "test_param_noise_reduction", "test_param_shading_mode", "test_param_tonemap_mode", "test_post_raw_sensitivity_boost", "test_raw_exposure", "test_reprocess_noise_reduction", "test_tonemap_sequence", "test_yuv_plus_dng"]},
-    {"scene": "scene1_3", "tests": ["test_capture_result", "test_dng_noise_model", "test_ev_compensation", "test_exposure_time_priority", "test_jpeg", "test_raw_burst_sensitivity", "test_raw_sensitivity", "test_sensitivity_priority", "test_yuv_jpeg_all", "test_yuv_plus_jpeg", "test_yuv_plus_raw"]},
-    {"scene": "scene2_a", "tests": ["test_display_p3", "test_effects", "test_exposure_keys_consistent", "test_format_combos", "test_num_faces", "test_reprocess_uv_swap"]},
-    {"scene": "scene2_b", "tests": ["test_preview_num_faces", "test_yuv_jpeg_capture_sameness"]},
-    {"scene": "scene2_c", "tests": ["test_camera_launch_perf_class", "test_default_camera_hdr", "test_jpeg_capture_perf_class", "test_num_faces"]},
-    {"scene": "scene2_d", "tests": ["test_autoframing", "test_num_faces", "test_preview_num_faces"]},
-    {"scene": "scene2_e", "tests": ["test_continuous_picture", "test_num_faces"]},
-    {"scene": "scene2_f", "tests": ["test_preview_num_faces"]},
-    {"scene": "scene2_g", "tests": ["test_preview_num_faces"]},
-    {"scene": "scene3", "tests": ["test_edge_enhancement", "test_flip_mirror", "test_imu_drift", "test_landscape_to_portrait", "test_lens_movement_reporting", "test_reprocess_edge_enhancement"]},
-    {"scene": "scene4", "tests": ["test_30_60fps_preview_fov_match", "test_aspect_ratio_and_crop", "test_multi_camera_alignment", "test_preview_aspect_ratio_and_crop", "test_preview_stabilization_fov", "test_video_aspect_ratio_and_crop"]},
-    {"scene": "scene6", "tests": ["test_in_sensor_zoom", "test_low_latency_zoom", "test_preview_video_zoom_match", "test_preview_zoom", "test_session_characteristics_zoom", "test_zoom"]},
-    {"scene": "scene7", "tests": ["test_multi_camera_switch"]},
-    {"scene": "scene8", "tests": ["test_ae_awb_regions", "test_color_correction_mode_cct"]},
-    {"scene": "scene9", "tests": ["test_jpeg_high_entropy", "test_jpeg_quality"]},
-    {"scene": "scene_hdr", "tests": ["test_hdr_extension"]},
-    {"scene": "scene_low_light", "tests": ["test_low_light_boost_extension", "test_night_extension"]},
-    {"scene": "scene6_tele", "tests": ["test_preview_zoom_tele", "test_zoom_tele"]},
-    {"scene": "scene7_tele", "tests": ["test_multi_camera_switch_tele"]},
-    {"scene": "scene_video", "tests": ["test_preview_frame_drop"]}
-]
-
-SCENE_ORDER = [item["scene"] for item in MASTER_STRUCTURE]
-SCENE_INDEX = {scene: index for index, scene in enumerate(SCENE_ORDER)}
-TEST_INDEX = {
-    (item["scene"], test_name): index
-    for item in MASTER_STRUCTURE
-    for index, test_name in enumerate(item["tests"])
-}
+MASTER_STRUCTURE: List[Dict[str, Any]] = []
+SCENE_ORDER: List[str] = []
+SCENE_INDEX: Dict[str, int] = {}
+TEST_INDEX: Dict[tuple[str, str], int] = {}
 
 STATUS_LINE_RE = re.compile(r"^(PASS|FAIL|SKIP)\s+", re.IGNORECASE)
 TEST_NAME_RE = re.compile(r"^\s*Test Name:\s*(test_[A-Za-z0-9_]+)\s*$", re.IGNORECASE | re.MULTILINE)
@@ -86,6 +59,135 @@ SCENE_NAME_ALIASES = {
     "scene_extensions/scene_hdr": "scene_hdr",
     "scene_extensions/scene_low_light": "scene_low_light",
 }
+
+
+def normalize_tc_scene(scene_name: str | None) -> str:
+    normalized = (scene_name or "").strip().strip("/")
+    normalized = normalized.replace("\\", "/")
+    return SCENE_NAME_ALIASES.get(normalized, normalized)
+
+
+def parse_tc_enabled(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "y", "on", "enable", "enabled", "use", "used"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off", "disable", "disabled", "unused"}:
+        return False
+
+    raise ValueError(f"Unsupported TC enabled flag: {value}")
+
+
+def parse_tc_entry(entry: Any) -> tuple[str, bool]:
+    if isinstance(entry, tuple) and len(entry) == 2:
+        test_name, enabled = entry
+        return str(test_name).strip(), parse_tc_enabled(enabled)
+
+    if isinstance(entry, dict):
+        test_name = entry.get("test") or entry.get("name") or entry.get("id") or ""
+        enabled = entry.get("enabled", entry.get("use", entry.get("active", True)))
+        return str(test_name).strip(), parse_tc_enabled(enabled)
+
+    raw_entry = str(entry).strip()
+    if ":" in raw_entry:
+        test_name, enabled = raw_entry.rsplit(":", 1)
+        return test_name.strip(), parse_tc_enabled(enabled)
+
+    return raw_entry, True
+
+
+def normalize_tc_list(raw_data: Any) -> List[Dict[str, Any]]:
+    if isinstance(raw_data, dict):
+        raw_items = raw_data.get("scenes") or raw_data.get("testStructure") or []
+    else:
+        raw_items = raw_data
+
+    if not isinstance(raw_items, list):
+        raise ValueError("TcList.json must contain a list of scene entries.")
+
+    normalized_items: List[Dict[str, Any]] = []
+    seen_scenes: set[str] = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            raise ValueError("Each TcList.json scene entry must be an object.")
+
+        scene_name = normalize_tc_scene(item.get("scene"))
+        if not scene_name:
+            raise ValueError("TcList.json scene entry is missing scene.")
+        if scene_name in seen_scenes:
+            raise ValueError(f"TcList.json has duplicated scene: {scene_name}")
+        seen_scenes.add(scene_name)
+
+        tests = item.get("tests", [])
+        if isinstance(tests, dict):
+            test_entries = list(tests.items())
+        elif isinstance(tests, list):
+            test_entries = tests
+        else:
+            raise ValueError(f"TcList.json tests for {scene_name} must be a list or object.")
+
+        normalized_tests: List[str] = []
+        seen_tests: set[str] = set()
+        for test_entry in test_entries:
+            normalized_test, enabled = parse_tc_entry(test_entry)
+            if not normalized_test:
+                continue
+            normalized_test = TEST_NAME_ALIASES.get((scene_name, normalized_test), normalized_test)
+            if not enabled:
+                continue
+            if normalized_test in seen_tests:
+                raise ValueError(
+                    f"TcList.json has duplicated test in {scene_name}: {normalized_test}"
+                )
+            seen_tests.add(normalized_test)
+            normalized_tests.append(normalized_test)
+
+        if normalized_tests:
+            normalized_items.append({"scene": scene_name, "tests": normalized_tests})
+
+    if not normalized_items:
+        raise ValueError("TcList.json does not contain any enabled scene entries.")
+
+    return normalized_items
+
+
+def set_master_structure(next_structure: List[Dict[str, Any]]) -> None:
+    global MASTER_STRUCTURE, SCENE_ORDER, SCENE_INDEX, TEST_INDEX
+
+    MASTER_STRUCTURE = [
+        {"scene": item["scene"], "tests": list(item["tests"])}
+        for item in next_structure
+    ]
+    SCENE_ORDER = [item["scene"] for item in MASTER_STRUCTURE]
+    SCENE_INDEX = {scene: index for index, scene in enumerate(SCENE_ORDER)}
+    TEST_INDEX = {
+        (item["scene"], test_name): index
+        for item in MASTER_STRUCTURE
+        for index, test_name in enumerate(item["tests"])
+    }
+
+
+def load_tc_list(tc_list_path: Path = DEFAULT_TC_LIST_PATH) -> List[Dict[str, Any]]:
+    with tc_list_path.open("r", encoding="utf-8") as tc_file:
+        raw_data = json.load(tc_file)
+    return normalize_tc_list(raw_data)
+
+
+def export_master_structure() -> List[Dict[str, Any]]:
+    return [
+        {"scene": item["scene"], "tests": list(item["tests"])}
+        for item in MASTER_STRUCTURE
+    ]
+
+
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 DEFAULT_CAMERA_ID = "cam_id_0"
 LIVE_STDOUT_SUFFIX = "_stdout.txt"
@@ -1942,6 +2044,7 @@ class ItsHandler(BaseHTTPRequestHandler):
                 "runCameraTrees": run_camera_trees,
                 "runCameraAnalysis": run_camera_analysis,
                 "runActiveCameraIds": run_active_camera_ids,
+                "testStructure": export_master_structure(),
                 "liveState": live_state,
                 "run": {
                     "name": latest_dir.name if latest_dir else "",
@@ -2223,11 +2326,18 @@ def main():
     port = args.port if args.port is not None else config["port"]
     replay_interval = args.replay_interval if args.replay_interval is not None else config["replay_interval"]
 
+    try:
+        tc_list = load_tc_list(DEFAULT_TC_LIST_PATH)
+        set_master_structure(tc_list)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise SystemExit(f"TcList Error: {error}") from error
+
     ItsHandler.monitor = ITSMonitor(results_dir, replay_interval)
     server = ThreadingHTTPServer(("127.0.0.1", port), ItsHandler)
     print(f"================================================")
     print(f"   ITS Integrated Monitor Started")
     print(f"   Config  : {args.config.absolute()}")
+    print(f"   TC List : {DEFAULT_TC_LIST_PATH.absolute()} ({len(tc_list)} scenes)")
     print(f"   Watching: {results_dir.absolute()}")
     if its_tools:
         print(f"   ITS Tools: {its_tools.absolute()}")
