@@ -736,6 +736,9 @@ function renderRunTabs() {
         cacheLiveTcTree(latestDashboardData);
       }
       renderStoredTcTree({ force: true });
+      if (selectedRunIsActive) {
+        restoreLiveResultPanels();
+      }
       updateStatus({ force: true });
     });
     runTabsContainer.appendChild(tabButton);
@@ -1614,6 +1617,16 @@ function activateCaptureTab(tabId) {
 
     if (targetTab) {
         targetTab.classList.add("active");
+    }
+}
+
+function restoreLiveResultPanels() {
+    activateCaptureTab("live");
+    activateLogTab("live");
+
+    if (liveSyncEnabled) {
+        fetchLiveLogs();
+        refreshLiveFeed();
     }
 }
 
